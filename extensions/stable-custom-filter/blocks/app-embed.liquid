@@ -1,0 +1,52 @@
+{% comment %}
+  App embed block (CLAUDE.md §12.1).
+
+  Loads the runtime once per page so predictive search can enhance the theme's
+  own header search field even on templates where no app block is placed.
+{% endcomment %}
+
+{%- if block.settings.enabled -%}
+  {% render 'scfs-context' %}
+
+  <link rel="stylesheet" href="{{ 'scfs.css' | asset_url }}" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="{{ 'scfs.css' | asset_url }}"></noscript>
+
+  <script src="{{ 'scfs.js' | asset_url }}" defer></script>
+
+  {%- if block.settings.enhance_theme_search -%}
+    <script type="application/json" data-scfs-embed>
+      {
+        "enhanceThemeSearch": true,
+        "themeSearchSelector": {{ block.settings.theme_search_selector | json }}
+      }
+    </script>
+  {%- endif -%}
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Stable Filter & Search",
+  "target": "body",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "Enable app",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "enhance_theme_search",
+      "label": "Add predictive search to the theme's own search field",
+      "default": false
+    },
+    {
+      "type": "text",
+      "id": "theme_search_selector",
+      "label": "Theme search input selector",
+      "info": "CSS selector for your theme's search input, for example: .header input[name='q']",
+      "default": "header input[name='q']"
+    }
+  ]
+}
+{% endschema %}

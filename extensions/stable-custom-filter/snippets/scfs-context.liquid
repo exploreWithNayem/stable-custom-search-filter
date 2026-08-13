@@ -1,0 +1,50 @@
+{% comment %}
+  Emits the shared runtime context exactly once per page, whichever block loads
+  first. Everything the script needs to boot without a round trip lives here.
+{% endcomment %}
+
+{%- unless scfs_context_rendered -%}
+  {%- assign scfs_context_rendered = true -%}
+
+  <script type="application/json" data-scfs-context>
+    {
+      "proxy": "/apps/scfs",
+      "routes": {
+        "search": {{ routes.search_url | json }},
+        "predictive": {{ routes.predictive_search_url | json }},
+        "collection": {{ collection.url | default: '' | json }}
+      },
+      "context": {
+        "template": {{ template.name | json }},
+        "collection": {{ collection.handle | default: '' | json }},
+        "term": {{ search.terms | default: '' | json }},
+        "locale": {{ request.locale.iso_code | json }},
+        "currency": {{ cart.currency.iso_code | json }},
+        "moneyFormat": {{ shop.money_format | json }}
+      },
+      "strings": {
+        "clearAll": {{ 'filters.clear_all' | t | json }},
+        "apply": {{ 'filters.apply' | t | json }},
+        "close": {{ 'filters.close' | t | json }},
+        "showMore": {{ 'filters.show_more' | t | json }},
+        "showLess": {{ 'filters.show_less' | t | json }},
+        "searchValues": {{ 'filters.search_values' | t | json }},
+        "sale": {{ 'products.sale' | t | json }},
+        "soldOut": {{ 'products.sold_out' | t | json }},
+        "empty": {{ 'products.empty' | t | json }},
+        "emptyAction": {{ 'products.empty_action' | t | json }},
+        "error": {{ 'products.error' | t | json }},
+        "loading": {{ 'toolbar.loading' | t | json }},
+        "previous": {{ 'pagination.previous' | t | json }},
+        "next": {{ 'pagination.next' | t | json }},
+        "loadMore": {{ 'pagination.load_more' | t | json }},
+        "searchProducts": {{ 'search.products' | t | json }},
+        "searchCollections": {{ 'search.collections' | t | json }},
+        "searchSuggestions": {{ 'search.suggestions' | t | json }},
+        "searchNoResults": {{ 'search.no_results' | t | json }},
+        "productOne": {{ 'toolbar.product_count.one' | t: count: '__COUNT__' | json }},
+        "productOther": {{ 'toolbar.product_count.other' | t: count: '__COUNT__' | json }}
+      }
+    }
+  </script>
+{%- endunless -%}

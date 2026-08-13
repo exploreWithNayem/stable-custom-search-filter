@@ -1,0 +1,383 @@
+// Stable Custom Filter & Search — data model
+// See CLAUDE.md §5 for the design rationale.
+//
+// PORTABILITY (CLAUDE.md D4/D5): this schema is authored so the same models work
+// on SQLite (local dev) and PostgreSQL (production). SQLite supports neither the
+// `Json` scalar nor `enum`, so:
+//   * JSON payloads are stored as `String` (stringified) and parsed via app/lib/json.ts
+//   * enums are `String` columns validated against const unions in app/config/*
+// Switching to PostgreSQL for production is a one-line provider change here plus a
+// fresh migration — no model changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Shopify session storage (managed by @shopify/shopify-app-session-storage-prisma)
+// Do not change this model's shape.
+// ---------------------------------------------------------------------------
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Shop
+// ---------------------------------------------------------------------------
+
+model Shop {
+  id            String    @id @default(cuid())
+  domain        String    @unique
+  name          String?
+  email         String?
+  currencyCode  String?
+  planName      String?
+  installedAt   DateTime  @default(now())
+  uninstalledAt DateTime?
+  onboardedAt   DateTime?
+  scopes        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  filters           Filter[]
+  filterGroups      FilterGroup[]
+  collectionFilters CollectionFilter[]
+  searchConfig      SearchConfiguration?
+  settings          AppSettings?
+  subscription      Subscription?
+  usages            Usage[]
+  suggestions       SearchSuggestion[]
+  synonyms          SearchSynonym[]
+  activity          ActivityLog[]
+
+  @@index([uninstalledAt])
+}
+
+// ---------------------------------------------------------------------------
+// Filters
+// ---------------------------------------------------------------------------
+
+model FilterGroup {
+  id          String   @id @default(cuid())
+  shopId      String
+  name        String
+  handle      String
+  position    Int      @default(0)
+  enabled     Boolean  @default(true)
+  defaultOpen Boolean  @default(true)
+  collapsible Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  shop    Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  filters Filter[]
+
+  @@unique([shopId, handle])
+  @@index([shopId, enabled, position])
+}
+
+model Filter {
+  id                 String   @id @default(cuid())
+  shopId             String
+  groupId            String?
+  name               String
+  handle             String
+  /// FilterSource union — see app/config/filter-types.ts
+  source             String
+  /// Option name, "namespace.key", or null for sourceless filters (price/availability)
+  sourceKey          String?
+  /// FilterDisplayType union — see app/config/filter-types.ts
+  displayType        String
+  position           Int      @default(0)
+  enabled            Boolean  @default(true)
+  multiSelect        Boolean  @default(true)
+  showCount          Boolean  @default(true)
+  hideEmpty          Boolean  @default(true)
+  collapsedByDefault Boolean  @default(false)
+  searchableValues   Boolean  @default(false)
+  maxVisibleValues   Int      @default(8)
+  /// count | alpha | manual
+  valueSort          String   @default("count")
+  /// Stringified JSON, display-type specific (step, prefix, buckets, …)
+  config             String   @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  shop   Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  group  FilterGroup?           @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  values FilterValue[]
+  items  CollectionFilterItem[]
+
+  @@unique([shopId, handle])
+  @@index([shopId, enabled, position])
+  @@index([shopId, source])
+  @@index([groupId, position])
+}
+
+model FilterValue {
+  id          String   @id @default(cuid())
+  filterId    String
+  value       String
+  label       String?
+  swatchColor String?
+  swatchImage String?
+  position    Int      @default(0)
+  hidden      Boolean  @default(false)
+  cachedCount Int?
+  updatedAt   DateTime @updatedAt
+
+  filter Filter @relation(fields: [filterId], references: [id], onDelete: Cascade)
+
+  @@unique([filterId, value])
+  @@index([filterId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Collection-specific configuration
+// ---------------------------------------------------------------------------
+
+model CollectionFilter {
+  id               String   @id @default(cuid())
+  shopId           String
+  collectionGid    String
+  collectionHandle String
+  title            String?
+  enabled          Boolean  @default(true)
+  /// true = inherit the shop default filter set; false = use `items`
+  useDefault       Boolean  @default(true)
+  layout           String   @default("sidebar")
+  settings         String   @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  shop  Shop                   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items CollectionFilterItem[]
+
+  @@unique([shopId, collectionGid])
+  @@index([shopId, collectionHandle])
+}
+
+model CollectionFilterItem {
+  id                 String  @id @default(cuid())
+  collectionFilterId String
+  filterId           String?
+  groupId            String?
+  position           Int     @default(0)
+  enabled            Boolean @default(true)
+
+  collectionFilter CollectionFilter @relation(fields: [collectionFilterId], references: [id], onDelete: Cascade)
+  filter           Filter?          @relation(fields: [filterId], references: [id], onDelete: Cascade)
+
+  @@index([collectionFilterId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+model SearchConfiguration {
+  id               String   @id @default(cuid())
+  shopId           String   @unique
+  enabled          Boolean  @default(true)
+  placeholder      String   @default("Search products")
+  minChars         Int      @default(2)
+  debounceMs       Int      @default(250)
+  maxSuggestions   Int      @default(6)
+  showImages       Boolean  @default(true)
+  showPrices       Boolean  @default(true)
+  showVendors      Boolean  @default(false)
+  showProductTypes Boolean  @default(false)
+  showCollections  Boolean  @default(true)
+  showViewAll      Boolean  @default(true)
+  noResultsText    String   @default("No products found")
+  updatedAt        DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model SearchSuggestion {
+  id        String   @id @default(cuid())
+  shopId    String
+  term      String
+  /// custom | redirect | featured
+  kind      String   @default("custom")
+  targetUrl String?
+  position  Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, term, kind])
+  @@index([shopId, enabled, position])
+}
+
+model SearchSynonym {
+  id            String   @id @default(cuid())
+  shopId        String
+  term          String
+  /// Stringified string[]
+  synonyms      String
+  bidirectional Boolean  @default(true)
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, term])
+  @@index([shopId, enabled])
+}
+
+// ---------------------------------------------------------------------------
+// Analytics — raw events plus daily rollups (dashboards never scan raw tables)
+// ---------------------------------------------------------------------------
+
+model SearchEvent {
+  id               String   @id @default(cuid())
+  shopId           String
+  term             String
+  normalizedTerm   String
+  resultCount      Int
+  collectionHandle String?
+  /// search | predictive
+  kind             String   @default("search")
+  clickedProductId String?
+  /// Salted hash of the storefront session id — never raw PII
+  sessionHash      String?
+  locale           String?
+  createdAt        DateTime @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([shopId, normalizedTerm, createdAt])
+  @@index([shopId, resultCount, createdAt])
+}
+
+model FilterEvent {
+  id               String   @id @default(cuid())
+  shopId           String
+  filterHandle     String
+  filterValue      String
+  collectionHandle String?
+  resultCount      Int
+  sessionHash      String?
+  createdAt        DateTime @default(now())
+
+  @@index([shopId, createdAt])
+  @@index([shopId, filterHandle, createdAt])
+}
+
+model SearchTermStat {
+  id             String   @id @default(cuid())
+  shopId         String
+  /// UTC midnight
+  day            DateTime
+  normalizedTerm String
+  searches       Int      @default(0)
+  zeroResults    Int      @default(0)
+  clicks         Int      @default(0)
+
+  @@unique([shopId, day, normalizedTerm])
+  @@index([shopId, day])
+}
+
+model FilterUsageStat {
+  id           String   @id @default(cuid())
+  shopId       String
+  day          DateTime
+  filterHandle String
+  filterValue  String
+  /// Empty string rather than NULL: SQLite treats NULLs as distinct in unique
+  /// constraints, which would break the upsert-increment rollup.
+  collectionHandle String @default("")
+  uses         Int      @default(0)
+
+  @@unique([shopId, day, filterHandle, filterValue, collectionHandle])
+  @@index([shopId, day])
+  @@index([shopId, day, collectionHandle])
+}
+
+// ---------------------------------------------------------------------------
+// Settings, billing, usage, audit
+// ---------------------------------------------------------------------------
+
+model AppSettings {
+  id         String   @id @default(cuid())
+  shopId     String   @unique
+  general    String   @default("{}")
+  appearance String   @default("{}")
+  analytics  String   @default("{}")
+  updatedAt  DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id               String    @id @default(cuid())
+  shopId           String    @unique
+  /// free | standard | pro
+  plan             String    @default("free")
+  /// active | pending | cancelled | expired | frozen
+  status           String    @default("active")
+  shopifyGid       String?
+  test             Boolean   @default(false)
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Usage {
+  id                 String   @id @default(cuid())
+  shopId             String
+  /// "YYYY-MM" in UTC
+  periodKey          String
+  searches           Int      @default(0)
+  filterInteractions Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, periodKey])
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  shopId     String
+  /// merchant | system | webhook
+  actor      String   @default("merchant")
+  /// filter.created, collection.updated, …
+  action     String
+  entityType String?
+  entityId   String?
+  summary    String
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+}

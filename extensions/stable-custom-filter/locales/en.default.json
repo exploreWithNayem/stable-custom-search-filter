@@ -1,0 +1,52 @@
+{
+  "filters": {
+    "heading": "Filters",
+    "clear_all": "Clear all",
+    "apply": "Apply filters",
+    "close": "Close filters",
+    "open": "Filter",
+    "show_more": "Show more",
+    "show_less": "Show less",
+    "search_values": "Search options",
+    "no_values": "No options available",
+    "in_stock": "In stock",
+    "out_of_stock": "Out of stock",
+    "stars_and_up": "{{ count }} stars and up",
+    "active_count": "{{ count }} active"
+  },
+  "toolbar": {
+    "product_count": {
+      "one": "{{ count }} product",
+      "other": "{{ count }} products"
+    },
+    "showing": "Showing {{ count }}",
+    "sort": "Sort",
+    "show": "Show",
+    "loading": "Loading results"
+  },
+  "search": {
+    "placeholder": "Search products",
+    "submit": "Search",
+    "clear": "Clear search",
+    "products": "Products",
+    "collections": "Collections",
+    "suggestions": "Suggestions",
+    "view_all": "Search for \"{{ term }}\"",
+    "no_results": "No products found"
+  },
+  "products": {
+    "sale": "Sale",
+    "sold_out": "Sold out",
+    "from_price": "From {{ price }}",
+    "quick_add": "Quick add",
+    "empty": "No products match these filters.",
+    "empty_action": "Clear all filters",
+    "error": "We couldn't load these products. Please try again."
+  },
+  "pagination": {
+    "previous": "Previous",
+    "next": "Next",
+    "load_more": "Load more",
+    "page": "Page {{ number }}"
+  }
+}

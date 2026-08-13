@@ -1,0 +1,33 @@
+{% comment %}
+  Active filter chips with per-chip removal and a clear-all control
+  (CLAUDE.md §10.4). Hidden until at least one filter is active.
+{% endcomment %}
+
+{% render 'scfs-context' %}
+
+<div class="scfs scfs-active" data-scfs-active-filters {{ block.shopify_attributes }} hidden>
+  {%- if block.settings.show_clear -%}
+    <button type="button" class="scfs-active__clear" data-scfs-clear-all>
+      {{ 'filters.clear_all' | t }}
+    </button>
+  {%- endif -%}
+
+  <ul class="scfs-active__list" data-scfs-chips role="list"></ul>
+</div>
+
+{% schema %}
+{
+  "name": "Active filters",
+  "target": "section",
+  "stylesheet": "scfs.css",
+  "javascript": "scfs.js",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "show_clear",
+      "label": "Show clear all button",
+      "default": true
+    }
+  ]
+}
+{% endschema %}

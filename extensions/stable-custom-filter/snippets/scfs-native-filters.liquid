@@ -1,0 +1,73 @@
+{% comment %}
+  No-JS / first-paint fallback.
+
+  Renders Shopify's own `collection.filters` server-side so the sidebar is
+  useful before scfs.js runs and remains usable if it never does. Once the
+  script boots it replaces this markup with the merchant-configured version
+  (labels, swatches, ordering) — see CLAUDE.md §7.
+
+  Accepts: filters (array), show_counts (boolean)
+{% endcomment %}
+
+{%- assign native_filters = filters | default: collection.filters -%}
+
+{%- for filter in native_filters -%}
+  <details class="scfs-group" open>
+    <summary class="scfs-group__summary">
+      <span class="scfs-group__title">{{ filter.label }}</span>
+      <span class="scfs-group__chevron" aria-hidden="true"></span>
+    </summary>
+
+    <div class="scfs-group__body">
+      {%- case filter.type -%}
+        {%- when 'price_range' -%}
+          <div class="scfs-range">
+            <label class="scfs-range__field">
+              <span class="scfs-visually-hidden">{{ filter.label }} minimum</span>
+              <input
+                type="number"
+                name="{{ filter.min_value.param_name }}"
+                value="{{ filter.min_value.value }}"
+                min="0"
+                max="{{ filter.range_max | money_without_currency | replace: ',', '' }}"
+                inputmode="decimal"
+              >
+            </label>
+            <span class="scfs-range__separator" aria-hidden="true">–</span>
+            <label class="scfs-range__field">
+              <span class="scfs-visually-hidden">{{ filter.label }} maximum</span>
+              <input
+                type="number"
+                name="{{ filter.max_value.param_name }}"
+                value="{{ filter.max_value.value }}"
+                min="0"
+                max="{{ filter.range_max | money_without_currency | replace: ',', '' }}"
+                inputmode="decimal"
+              >
+            </label>
+          </div>
+
+        {%- else -%}
+          <ul class="scfs-values" role="list">
+            {%- for value in filter.values -%}
+              <li class="scfs-values__item">
+                <label class="scfs-value{% if value.count == 0 and value.active == false %} scfs-value--empty{% endif %}">
+                  <input
+                    type="checkbox"
+                    name="{{ value.param_name }}"
+                    value="{{ value.value }}"
+                    {% if value.active %}checked{% endif %}
+                    {% if value.count == 0 and value.active == false %}disabled{% endif %}
+                  >
+                  <span class="scfs-value__label">{{ value.label }}</span>
+                  {%- if show_counts -%}
+                    <span class="scfs-value__count">({{ value.count }})</span>
+                  {%- endif -%}
+                </label>
+              </li>
+            {%- endfor -%}
+          </ul>
+      {%- endcase -%}
+    </div>
+  </details>
+{%- endfor -%}

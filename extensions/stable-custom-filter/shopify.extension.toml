@@ -1,0 +1,7 @@
+api_version = "2026-07"
+
+[[extensions]]
+type = "theme"
+name = "Stable Custom Filter & Search"
+handle = "stable-custom-filter"
+uid = "b4efa073-4e96-dae1-5390-929710523d075307260f"

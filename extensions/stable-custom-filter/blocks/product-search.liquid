@@ -1,0 +1,145 @@
+{% comment %}
+  Product search app block with predictive suggestions (CLAUDE.md §11).
+
+  Progressive enhancement: without JS this is a plain GET form to /search, which
+  is a fully working search. The script adds debouncing, suggestions and
+  in-place result updates.
+{% endcomment %}
+
+{% render 'scfs-context' %}
+
+<div
+  class="scfs scfs-search"
+  data-scfs-search
+  data-scfs-min-chars="{{ block.settings.min_chars }}"
+  data-scfs-debounce="{{ block.settings.debounce }}"
+  data-scfs-predictive="{{ block.settings.predictive }}"
+  data-scfs-filter-results="{{ block.settings.filter_results }}"
+  style="--scfs-radius: {{ block.settings.border_radius }}px;"
+  {{ block.shopify_attributes }}
+>
+  <form
+    class="scfs-search__form"
+    action="{{ routes.search_url }}"
+    method="get"
+    role="search"
+    data-scfs-search-form
+  >
+    <input type="hidden" name="type" value="product">
+
+    <label class="scfs-visually-hidden" for="scfs-search-input">
+      {{ block.settings.placeholder | default: 'search.placeholder' | t }}
+    </label>
+
+    <div class="scfs-search__field">
+      <svg class="scfs-search__icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path
+          d="M13 13l4 4M8.5 15a6.5 6.5 0 110-13 6.5 6.5 0 010 13z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+        />
+      </svg>
+
+      <input
+        id="scfs-search-input"
+        class="scfs-search__input"
+        type="search"
+        name="q"
+        value="{{ search.terms | escape }}"
+        placeholder="{{ block.settings.placeholder }}"
+        autocomplete="off"
+        role="combobox"
+        aria-expanded="false"
+        aria-controls="scfs-search-results"
+        aria-autocomplete="list"
+        data-scfs-search-input
+      >
+
+      <button
+        type="button"
+        class="scfs-search__clear"
+        data-scfs-search-clear
+        aria-label="{{ 'search.clear' | t }}"
+        hidden
+      >
+        <span aria-hidden="true">&times;</span>
+      </button>
+
+      <button type="submit" class="scfs-search__submit">
+        {{ 'search.submit' | t }}
+      </button>
+    </div>
+
+    <div
+      id="scfs-search-results"
+      class="scfs-search__results"
+      data-scfs-search-results
+      role="listbox"
+      aria-label="{{ 'search.suggestions' | t }}"
+      hidden
+    ></div>
+  </form>
+
+  <span class="scfs-visually-hidden" role="status" data-scfs-search-status></span>
+</div>
+
+{% schema %}
+{
+  "name": "Product search",
+  "target": "section",
+  "stylesheet": "scfs.css",
+  "javascript": "scfs.js",
+  "settings": [
+    {
+      "type": "text",
+      "id": "placeholder",
+      "label": "Placeholder",
+      "default": "Search products"
+    },
+    {
+      "type": "checkbox",
+      "id": "predictive",
+      "label": "Show predictive suggestions",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "filter_results",
+      "label": "Filter the results on this page as the shopper types",
+      "info": "Turn off to send shoppers to the search results page instead.",
+      "default": true
+    },
+    {
+      "type": "range",
+      "id": "min_chars",
+      "label": "Minimum characters",
+      "min": 1,
+      "max": 6,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "range",
+      "id": "debounce",
+      "label": "Debounce delay",
+      "min": 0,
+      "max": 1000,
+      "step": 50,
+      "unit": "ms",
+      "default": 250
+    },
+    {
+      "type": "range",
+      "id": "border_radius",
+      "label": "Corner radius",
+      "min": 0,
+      "max": 24,
+      "step": 2,
+      "unit": "px",
+      "default": 6
+    }
+  ]
+}
+{% endschema %}
