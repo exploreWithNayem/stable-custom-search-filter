@@ -58,6 +58,10 @@ module.exports = {
       },
       rules: {
         "react/no-unknown-property": ["error", { ignore: ["variant"] }],
+        // Polaris web components nest deeply (s-box > s-stack > s-stack), so a
+        // label's own text often sits further down than the rule's default
+        // depth of 2. The association itself is still checked.
+        "jsx-a11y/label-has-associated-control": ["error", { depth: 6 }],
       },
     },
 

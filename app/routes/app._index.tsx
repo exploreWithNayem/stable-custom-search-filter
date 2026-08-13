@@ -89,7 +89,7 @@ export default function Dashboard() {
       {!onboarded ? (
         <s-section heading="Get started">
           <s-paragraph>
-            Create your first filter, then add the <strong>Product filters</strong>{" "}
+            Create your first filter, then add the <strong>Products &amp; filter</strong>{" "}
             block to a collection page in your theme editor.
           </s-paragraph>
           <s-stack direction="inline" gap="base">

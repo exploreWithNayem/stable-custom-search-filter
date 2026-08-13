@@ -1,0 +1,183 @@
+{% comment %}
+  Server-rendered product card.
+
+  Deliberately emits the same class names as `renderCard()` in
+  extension-src/render-results.ts, so the first paint and every later AJAX
+  render look identical — one stylesheet describes both. If you change a class
+  here, change it there.
+
+  Accepts: product, show_vendor, show_rating, show_swatches, show_second_image,
+           image_ratio, index (for eager-loading the first row)
+{% endcomment %}
+
+{%- liquid
+  assign on_sale = false
+  if product.compare_at_price > product.price
+    assign on_sale = true
+  endif
+
+  assign hover_image = null
+  if show_second_image and product.images.size > 1
+    assign hover_image = product.images[1]
+  endif
+
+  comment
+    The first row is above the fold on every layout, so it loads eagerly; the
+    rest stay lazy. Explicit dimensions keep added CLS at zero (§17).
+  endcomment
+  assign loading = 'lazy'
+  if index < 4
+    assign loading = 'eager'
+  endif
+
+  comment
+    Liquid does not evaluate filters inside a filter's arguments, so anything
+    passed to `image_tag` or `t` has to be built first.
+  endcomment
+  assign image_alt = product.featured_image.alt | default: product.title
+  assign price_formatted = product.price | money
+  assign compare_formatted = product.compare_at_price | money
+-%}
+
+<article class="scfs-card" data-product-id="{{ product.id }}">
+  <a class="scfs-card__link" href="{{ product.url }}">
+    <div class="scfs-card__media scfs-card__media--{{ image_ratio | default: 'adapt' }}">
+      {%- if product.featured_image -%}
+        {{
+          product.featured_image
+          | image_url: width: 500
+          | image_tag:
+            class: 'scfs-card__image',
+            loading: loading,
+            widths: '300,400,500,750',
+            sizes: '(min-width: 990px) 300px, 45vw',
+            alt: image_alt
+        }}
+        {%- if hover_image -%}
+          {%- comment -%}
+            An empty alt is what hides the hover image from assistive tech; the
+            `aria-hidden` attribute cannot be passed to `image_tag`, because a
+            hyphen is not valid in a Liquid argument name.
+          {%- endcomment -%}
+          {{
+            hover_image
+            | image_url: width: 500
+            | image_tag:
+              class: 'scfs-card__image scfs-card__image--hover',
+              loading: 'lazy',
+              alt: ''
+          }}
+        {%- endif -%}
+      {%- else -%}
+        <div class="scfs-card__image-placeholder"></div>
+      {%- endif -%}
+
+      {%- if product.available == false -%}
+        <div class="scfs-card__badges">
+          <span class="scfs-badge scfs-badge--sold-out">{{ 'products.sold_out' | t }}</span>
+        </div>
+      {%- elsif on_sale -%}
+        <div class="scfs-card__badges">
+          <span class="scfs-badge scfs-badge--sale">{{ 'products.sale' | t }}</span>
+        </div>
+      {%- endif -%}
+    </div>
+  </a>
+
+  <div class="scfs-card__body">
+    {%- if show_vendor and product.vendor != blank -%}
+      <p class="scfs-card__vendor">{{ product.vendor }}</p>
+    {%- endif -%}
+
+    <h3 class="scfs-card__title">
+      <a href="{{ product.url }}">{{ product.title }}</a>
+    </h3>
+
+    {%- if show_rating -%}
+      {%- assign rating = product.metafields.reviews.rating.value -%}
+      {%- if rating -%}
+        {%- assign rounded = rating.rating | round -%}
+        <div
+          class="scfs-card__rating"
+          aria-label="Rated {{ rating.rating }} out of {{ rating.scale_max }}"
+        >
+          <span class="scfs-card__stars" aria-hidden="true">
+            {%- for i in (1..5) -%}
+              <span class="scfs-star{% if i <= rounded %} scfs-star--on{% endif %}">★</span>
+            {%- endfor -%}
+          </span>
+          {%- assign count = product.metafields.reviews.rating_count.value -%}
+          {%- if count -%}
+            <span class="scfs-card__rating-count">({{ count }})</span>
+          {%- endif -%}
+        </div>
+      {%- endif -%}
+    {%- endif -%}
+
+    <div class="scfs-card__price">
+      <span class="scfs-price{% if on_sale %} scfs-price--sale{% endif %}">
+        {%- if product.price_varies -%}
+          {{ 'products.from_price' | t: price: price_formatted }}
+        {%- else -%}
+          {{ price_formatted }}
+        {%- endif -%}
+      </span>
+      {%- if on_sale -%}
+        <s class="scfs-price scfs-price--compare">{{ compare_formatted }}</s>
+      {%- endif -%}
+    </div>
+
+    {%- comment -%}
+      The first non-colour option, shown as a size hint. Colour is excluded
+      because it is already carried by the swatches below.
+    {%- endcomment -%}
+    {%- for option in product.options_with_values -%}
+      {%- assign name = option.name | downcase -%}
+      {%- unless name contains 'color' or name contains 'colour' -%}
+        {%- if option.values.size > 0 and forloop.index <= 2 -%}
+          <ul class="scfs-card__options" role="list" aria-label="{{ option.name }}">
+            {%- for value in option.values limit: 6 -%}
+              <li class="scfs-card__option">{{ value }}</li>
+            {%- endfor -%}
+            {%- if option.values.size > 6 -%}
+              <li class="scfs-card__option">…</li>
+            {%- endif -%}
+          </ul>
+          {%- break -%}
+        {%- endif -%}
+      {%- endunless -%}
+    {%- endfor -%}
+
+    {%- if show_swatches -%}
+      {%- for option in product.options_with_values -%}
+        {%- assign name = option.name | downcase -%}
+        {%- if name contains 'color' or name contains 'colour' -%}
+          <ul class="scfs-card__swatches" role="list" aria-label="{{ option.name }}">
+            {%- for value in option.values limit: 4 -%}
+              <li class="scfs-card__swatch-item" title="{{ value | escape }}">
+                {%- comment -%}
+                  Native swatches carry a colour or image; without one the chip
+                  falls back to the value's own CSS colour name, which covers
+                  "Black", "Navy" and friends.
+                {%- endcomment -%}
+                <span
+                  class="scfs-card__swatch"
+                  style="background-color: {{ value.swatch.color | default: value | escape }};
+                    {% if value.swatch.image %}background-image: url({{ value.swatch.image | image_url: width: 40 }});{% endif %}"
+                ></span>
+                <span class="scfs-visually-hidden">{{ value }}</span>
+              </li>
+            {%- endfor -%}
+            {%- if option.values.size > 4 -%}
+              {%- assign remaining = option.values.size | minus: 4 -%}
+              <li class="scfs-card__swatch-item scfs-card__swatch-item--more">
+                <span class="scfs-card__swatch-more">+{{ remaining }}</span>
+              </li>
+            {%- endif -%}
+          </ul>
+          {%- break -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+  </div>
+</article>

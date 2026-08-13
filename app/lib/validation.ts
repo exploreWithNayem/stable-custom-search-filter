@@ -146,14 +146,24 @@ export type FilterGroupInput = z.infer<typeof filterGroupInputSchema>;
 // Collections
 // ---------------------------------------------------------------------------
 
+/**
+ * Desktop filter layouts. These are the shapes a merchant picks between in
+ * Filters → Layout; each one maps to a `.scfs-app--<value>` rule in the
+ * extension stylesheet, so adding one here means adding one there.
+ */
 export const LAYOUTS = [
   "sidebar",
-  "horizontal",
-  "dropdown",
-  "drawer",
-  "accordion",
+  "offcanvas",
+  "collapsed",
+  "columns_1",
+  "columns_2",
+  "columns_3",
+  "show_all",
 ] as const;
 export type Layout = (typeof LAYOUTS)[number];
+
+export const MOBILE_LAYOUTS = ["drawer", "fullscreen", "inline"] as const;
+export type MobileLayout = (typeof MOBILE_LAYOUTS)[number];
 
 export const collectionFilterInputSchema = z.object({
   collectionGid: z
@@ -247,6 +257,7 @@ export type Engine = (typeof ENGINES)[number];
 export const generalSettingsSchema = z.object({
   engine: z.enum(ENGINES).default("auto"),
   defaultLayout: z.enum(LAYOUTS).default("sidebar"),
+  mobileLayout: z.enum(MOBILE_LAYOUTS).default("drawer"),
   defaultPerPage: z
     .number()
     .int()

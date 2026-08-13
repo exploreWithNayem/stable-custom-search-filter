@@ -103,8 +103,11 @@ export interface ProductsResponse {
 }
 
 export interface ConfigResponse {
-  engine: "native" | "app";
+  engine: "app";
+  /** False when at least one filter cannot be expressed by Shopify natively. */
+  nativeEligible: boolean;
   layout: string;
+  mobileLayout: string;
   source: string;
   collectionHandle: string | null;
   filters: {

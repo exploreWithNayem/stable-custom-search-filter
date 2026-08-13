@@ -92,7 +92,10 @@ function renderRating(product: ProductCard): HTMLElement | null {
   if (!product.rating) return null;
 
   const rounded = Math.round(product.rating.value);
-  const stars = el("span", { class: "scfs-card__stars", "aria-hidden": "true" });
+  const stars = el("span", {
+    class: "scfs-card__stars",
+    "aria-hidden": "true",
+  });
   for (let index = 1; index <= 5; index += 1) {
     stars.appendChild(
       el("span", {
@@ -175,9 +178,12 @@ function renderSwatches(product: ProductCard): HTMLElement | null {
     "aria-label": "Available colours",
   });
 
-  for (const swatch of product.swatches.slice(0, 5)) {
+  const VISIBLE = 4;
+
+  for (const swatch of product.swatches.slice(0, VISIBLE)) {
     const chip = el("span", { class: "scfs-card__swatch" });
-    if (swatch.image) chip.style.backgroundImage = `url(${CSS.escape(swatch.image)})`;
+    if (swatch.image)
+      chip.style.backgroundImage = `url(${CSS.escape(swatch.image)})`;
     else if (swatch.color) chip.style.backgroundColor = swatch.color;
 
     list.appendChild(
@@ -188,6 +194,26 @@ function renderSwatches(product: ProductCard): HTMLElement | null {
     );
   }
 
+  const remaining = product.swatches.length - VISIBLE;
+  if (remaining > 0) {
+    // The overflow pill names the colours it stands for, so the count is not
+    // the only thing a screen reader gets.
+    const rest = product.swatches.slice(VISIBLE).map((swatch) => swatch.value);
+    list.appendChild(
+      el(
+        "li",
+        { class: "scfs-card__swatch-item scfs-card__swatch-item--more" },
+        [
+          el("span", {
+            class: "scfs-card__swatch-more",
+            text: `+${remaining}`,
+          }),
+          el("span", { class: "scfs-visually-hidden", text: rest.join(", ") }),
+        ],
+      ),
+    );
+  }
+
   return list;
 }
 
@@ -195,7 +221,10 @@ export function renderCard(
   product: ProductCard,
   options: CardOptions,
 ): HTMLElement {
-  const card = el("article", { class: "scfs-card", "data-product-id": product.id });
+  const card = el("article", {
+    class: "scfs-card",
+    "data-product-id": product.id,
+  });
 
   const link = el("a", { class: "scfs-card__link", href: product.url }, [
     renderImage(product, options),
@@ -205,7 +234,9 @@ export function renderCard(
   const body = el("div", { class: "scfs-card__body" });
 
   if (options.showVendor && product.vendor) {
-    body.appendChild(el("p", { class: "scfs-card__vendor", text: product.vendor }));
+    body.appendChild(
+      el("p", { class: "scfs-card__vendor", text: product.vendor }),
+    );
   }
 
   body.appendChild(
@@ -267,7 +298,9 @@ export function renderGrid(
     showRating: container.dataset.scfsShowRating === "true",
     showSwatches: container.dataset.scfsShowSwatches === "true",
     showSecondImage: container.dataset.scfsShowSecondImage === "true",
-    imageRatio: container.dataset.scfsImageRatio ?? "square",
+    // Must match the block's own default, or the grid would change shape the
+    // moment the runtime re-renders it.
+    imageRatio: container.dataset.scfsImageRatio || "adapt",
   };
 
   if (result.products.length === 0) {
@@ -287,19 +320,28 @@ export function renderGrid(
 // Count, chips, pagination
 // ---------------------------------------------------------------------------
 
-export function renderCount(result: ProductsResponse | null): void {
+export function renderCount(
+  result: ProductsResponse | null,
+  activeCount: number,
+): void {
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>("[data-scfs-count]"),
   );
   if (nodes.length === 0 || !result) return;
 
-  // `totalCount` is null when the Storefront API cannot prove a total
-  // (CLAUDE.md §7) — show what is on screen rather than inventing a number.
-  const text =
-    result.totalCount !== null
-      ? formatCount(result.totalCount)
-      : `${readContext().strings.searchProducts}: ${result.products.length}+`;
+  if (result.totalCount === null) {
+    // The Storefront API cannot always prove a total (CLAUDE.md §7). With no
+    // filters applied Liquid already rendered an exact one, and replacing that
+    // with "24+" would be a downgrade — so leave it alone. Once a filter is on,
+    // the server count is stale and the loaded count is the honest answer.
+    if (activeCount === 0) return;
 
+    const approximate = `${readContext().strings.searchProducts}: ${result.products.length}+`;
+    for (const node of nodes) node.textContent = approximate;
+    return;
+  }
+
+  const text = formatCount(result.totalCount);
   for (const node of nodes) node.textContent = text;
 }
 
@@ -322,7 +364,11 @@ export function renderChips(chips: ActiveChip[]): void {
         });
         button.appendChild(document.createTextNode(chip.label));
         button.appendChild(
-          el("span", { class: "scfs-chip__remove", "aria-hidden": "true", text: "×" }),
+          el("span", {
+            class: "scfs-chip__remove",
+            "aria-hidden": "true",
+            text: "×",
+          }),
         );
         button.addEventListener("click", () =>
           actions.removeChip(chip.param, chip.value),

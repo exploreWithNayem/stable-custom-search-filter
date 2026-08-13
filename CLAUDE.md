@@ -111,7 +111,7 @@ Decisions are binding unless this file is updated with a reason.
 | D4 | **PostgreSQL** for production; schema authored **provider-portable** so local SQLite keeps working | SQLite cannot serve analytics aggregation at scale |
 | D5 | JSON columns stored as `String` (stringified) and enums as `String` + const unions | Prisma SQLite supports neither `Json` nor `enum`; keeps one schema for both providers |
 | D6 | Storefront data is fetched **server-side** through an **App Proxy**; the browser never talks to Shopify APIs with app credentials | Security + §42 |
-| D7 | Two storefront engines — **Native** and **App** (see §7). Native is the default when possible | §41: minimum JS, minimum API calls |
+| D7 | ~~Two storefront engines — **Native** and **App**~~ **Superseded:** one engine, App. The `products-filter` block renders the product listing itself, so there is no theme-rendered grid for Native to refresh (see §7) | §41 still applies through caching, debouncing and one request per interaction |
 | D8 | Facet values and counts come from Shopify's **Storefront API `filters`** on `collection.products` / `search`, not from client-side catalog scans | §41: never download the catalog |
 | D9 | Predictive search uses the theme's native `/search/suggest.json` unless synonyms/redirects/custom suggestions are enabled, which routes it through the app proxy | Zero-cost fast path |
 | D10 | Filter URL grammar mirrors **Shopify's native `filter.*` params** | §19 compatibility requirement |
@@ -162,9 +162,10 @@ app/
 ├── routes/                      # flat-file routes (flatRoutes())
 │   ├── app.tsx                  # embedded shell + nav
 │   ├── app._index.tsx           # Dashboard
-│   ├── app.filters._index.tsx
-│   ├── app.filters.new.tsx
-│   ├── app.filters.$id.tsx      # Filter builder (edit)
+│   ├── app.filters._index.tsx   # Filter tree
+│   ├── app.filters.new.tsx      # Add filter option
+│   ├── app.filters.$id.tsx      # Filter option builder (edit)
+│   ├── app.filters.layout.tsx   # Desktop / mobile layout picker
 │   ├── app.groups._index.tsx
 │   ├── app.groups.$id.tsx
 │   ├── app.collections._index.tsx
@@ -175,7 +176,10 @@ app/
 │   ├── app.analytics._index.tsx
 │   ├── app.analytics.searches.tsx
 │   ├── app.analytics.filters.tsx
-│   ├── app.settings.tsx
+│   ├── app.settings._index.tsx  # hub of cards
+│   ├── app.settings.general.tsx
+│   ├── app.settings.appearance.tsx
+│   ├── app.settings.analytics.tsx
 │   ├── app.pricing.tsx
 │   ├── app.help.tsx
 │   ├── api.metafields.tsx       # admin-authenticated resource routes
@@ -228,13 +232,12 @@ app/
 
 extensions/stable-custom-filter/     # only these four directories are allowed
 ├── shopify.extension.toml
-├── blocks/      filter-sidebar · product-search · filter-search · active-filters ·
-│                filter-toolbar · product-results · app-embed (.liquid)
-├── snippets/    scfs-filter-group · scfs-product-card · scfs-swatch (.liquid)
+├── blocks/      products-filter · app-embed (.liquid)
+├── snippets/    scfs-context · scfs-native-filters · scfs-product-card (.liquid)
 ├── assets/      scfs.js · scfs.css   (built — do not edit)
 └── locales/     en.default.json
 
-extension-src/                       # TypeScript source for extensions/*/assets/scfs.js
+extension-src/                       # source for extensions/*/assets/* (TS + CSS)
 
 prisma/
 ├── schema.prisma
@@ -723,9 +726,11 @@ and mirrored into `Subscription` / `Usage`. Enforcement is server-side.
 
 ## 7. Storefront rendering engines
 
-Two engines share the same URL grammar, filter config, chips, drawer, and analytics.
+> **Superseded.** This section planned two engines. The app ships **one**: Engine App. See
+> "Why Engine Native is gone" below — the plan is kept because the reasoning still explains the
+> first-paint fallback (§12.4) and the URL-grammar requirement (D10), both of which survive.
 
-### Engine Native (default when compatible)
+### Engine Native (planned, not shipped)
 
 - Filter interactions rewrite the URL with Shopify's native `filter.*` params.
 - Results are refreshed with the **Section Rendering API** (`?section_id=<collection section>`), so
@@ -735,7 +740,21 @@ Two engines share the same URL grammar, filter config, chips, drawer, and analyt
 - Constraint: usable only when **every** active filter maps 1:1 to a native Shopify storefront
   filter. The admin marks non-native filters clearly.
 
-### Engine App
+### Why Engine Native is gone
+
+`products-filter` is the collection page's product listing: it renders the grid and pagination
+itself, replacing the theme's product section. Engine Native's whole premise is that the *theme*
+renders the products, so the two cannot coexist on the same page — with the block placed there is no
+theme-rendered grid left to refresh. Keeping an engine setting that could never change behaviour
+would have been a control that does nothing, so the picker is gone from the admin and
+`/apps/scfs/config` reports `engine: "app"` unconditionally.
+
+What survives from the plan: the URL grammar still mirrors Shopify's `filter.*` params (D10), so
+links stay shareable and compatible; `nativeEligible` is still computed and returned, because
+"Shopify itself could not express this filter" is useful for a merchant to know; and §12.4's
+server-rendered `collection.filters` fallback still gives a usable sidebar before `scfs.js` boots.
+
+### Engine App (the engine)
 
 - Filter interactions call `/apps/scfs/products`; the app queries the **Storefront API**
   server-side and returns JSON; the extension renders cards from `scfs-product-card`.
@@ -745,9 +764,9 @@ Two engines share the same URL grammar, filter config, chips, drawer, and analyt
   `(shop, context, filterSignature, sort, page, perPage, locale, currency)`, invalidated by product
   and collection webhooks.
 
-Engine selection: `AppSettings.general.engine = "auto" | "native" | "app"`, default `auto`
-(= native when compatible, otherwise app). The chosen engine is reported in `meta.engine` and
-surfaced in the admin so merchants understand the trade-off.
+`AppSettings.general.engine` remains in the schema so stored blobs from earlier versions still
+validate, but nothing reads it. Do not add a UI for it back without first restoring a code path that
+it actually changes.
 
 ---
 
@@ -887,11 +906,22 @@ REVIEW RATINGS     ★★★★★ / ★★★★☆ / ★★★☆☆ / ★★�
 Long value lists collapse to `maxVisibleValues` with "Show more"; `searchableValues` adds an
 in-section filter input.
 
+Presentation details that make the sidebar read as one control rather than a stack of widgets:
+the disclosure caret **leads** each heading (CSS `order: -1`, so the DOM keeps title → count →
+marker); each group is separated by a rule; counts are right-aligned and muted; pill lists lay out
+on a `repeat(auto-fill, minmax(100px, 1fr))` grid so a long value wraps inside its own box instead
+of stretching one pill across the column; and a range's unit sits **inside** its bordered field.
+A price range with no configured unit falls back to the shop's currency symbol, taken from `Intl`
+rather than parsed out of the theme's Liquid money format.
+
 ### 10.3 Toolbar
 
-Product count · Clear All · active filter chips · `Show [12|24|36|48]` · `Sort [ … ]`.
-Each element individually toggleable by the merchant. Count updates on every result change and is
-announced via an `aria-live="polite"` region.
+`View as [▦|☰]` · product count · `Show [12|24|36|48]` · `Sort by [ … ]`, laid out on a
+`1fr auto 1fr` grid so the count is genuinely centred on the results rather than merely between the
+controls flanking it, with a rule beneath. Below 750px the count drops to its own row. Each element
+is individually toggleable by the merchant. Count updates on every result change and is announced
+via an `aria-live="polite"` region. The grid/list choice is remembered per shopper in
+`localStorage`; active filter chips sit under the toolbar.
 
 ### 10.4 Active filter chips
 
@@ -990,42 +1020,72 @@ Extension handle: `stable-custom-filter`. Generate with `npm run generate` (Them
 
 | Block | Type | Purpose |
 | --- | --- | --- |
-| `filter-sidebar` | app block | Configured filters (sidebar / horizontal / dropdown / accordion) |
-| `product-search` | app block | Search input + predictive dropdown |
-| `filter-search` | app block | Filters and search together |
-| `active-filters` | app block | Active filter chips + Clear All |
-| `filter-toolbar` | app block | Count, Clear All, sort, per-page |
-| `product-results` | app block | Product grid (Engine App / custom cards) |
+| `products-filter` | app block | **"Products & filter"** — the collection page's product listing, whole: product grid, pagination, filters, search field, toolbar, active chips, mobile drawer |
 | `app-embed` | app embed | Global bootstrap: config JSON, styles, predictive search on the theme header |
 
+The block **replaces** the theme's own product section rather than sitting beside it, and renders the
+products itself in Liquid (§12.4) — the page is a complete, paginated product listing before any
+JavaScript runs. A merchant who leaves the theme's section on the template as well gets two grids;
+the Help page says to remove it.
+
+> **Deviation from the original six-block plan** (`filter-sidebar` / `product-search` /
+> `filter-search` / `active-filters` / `filter-toolbar` / `product-results`): merchants had to place
+> and order six blocks correctly to get a working page, and any subset produced something
+> half-broken — a grid with no filters, or filters driving nothing. One block cannot be
+> mis-assembled. Everything that was a separate block is now a toggle inside it, and arrangement is
+> the `desktop_layout` setting rather than a placement decision. The runtime is unchanged: it still
+> keys off `[data-scfs-sidebar]`, `[data-scfs-results]` and `[data-scfs-search]`, which now all
+> live inside one root.
+
 App blocks require an Online Store 2.0 section that supports `@app` blocks. The Help page must
-explain where to add each block and what to do on themes that do not support them.
+explain where to add the block and what to do on themes that do not support it.
 
 ### 12.2 Settings (schema)
 
-Layout (`sidebar`/`horizontal`/`dropdown`/`drawer`/`accordion`) · filter position (left/right) ·
-filter spacing · filter title · columns (2–5) · show product counts · show clear button · show
-active filters · enable search · enable sort · show product count · mobile drawer on/off ·
-product card options (hover image, badges, rating, swatches, quick add) · colour and radius tokens ·
+Desktop layout (§12.5) · mobile layout (`drawer`/`fullscreen`/`inline`) · content width · filter
+position (left/right) · filter width · filter spacing · filter title · columns (2–5) ·
+show product counts ·
+show clear button · show active filters · enable search · enable sort · grid/list switch ·
+product card options (hover image, badges, rating, swatches) · colour and radius tokens ·
 custom CSS escape hatch.
 
 Settings resolve in this order: **theme block setting → collection config → shop AppSettings →
 defaults**. Document this precedence in the block schema help text.
 
-Schema constraint: a `range` setting must span **at least 3 steps** (`(max - min) / step + 1 >= 3`),
-otherwise the extension fails to bundle. Two-value choices use `select` instead — which is why
-`columns_mobile` is a select of `"1"` / `"2"`; the CSS matches on the attribute string either way.
+`content_width` exists because themes disagree about whether a section constrains its own width. On
+a full-bleed collection section the listing ran edge to edge, and three columns across a 1900px
+viewport produced cards over 700px tall. The block therefore carries its own maximum (default
+1300px) and centres itself; `page` opts out for themes that already handle it.
+
+Both layout settings default to **`auto`**, meaning "use the app setting". Liquid cannot read
+`AppSettings`, so the block renders with the sidebar defaults and `applyConfiguredLayout()` in
+`extension-src/index.ts` corrects it once `/apps/scfs/config` lands. Without that `auto` default the
+block would always win the precedence chain and the admin's layout picker could never take effect.
+
+Two schema constraints the bundler enforces, both of which fail `shopify app dev` outright:
+
+- A `range` setting must span **at least 3 steps** (`(max - min) / step + 1 >= 3`). Two-value choices
+  use `select` instead — which is why `columns_mobile` is a select of `"1"` / `"2"`; the CSS matches
+  on the attribute string either way.
+- A block may declare at most **6 non-interactive settings**, with `header` and `paragraph` sharing
+  one allowance. The block's six section headers use all of it, so explanatory copy goes in an `info`
+  on the setting it describes rather than in a paragraph of its own.
 
 ### 12.3 Storefront assets
 
 **Built** artifacts (committed, produced by `npm run build:extension`):
 
-| Asset | Contents |
-| --- | --- |
-| `assets/scfs.js` | One bundle: context, URL codec, store, facet/result rendering, search, drawer, analytics |
-| `assets/scfs.css` | Hand-authored; CSS custom properties driven by block settings |
+| Asset | Built from | Contents |
+| --- | --- | --- |
+| `assets/scfs.js` | `extension-src/index.ts` | One bundle: context, URL codec, store, facet/result rendering, search, drawer, analytics |
+| `assets/scfs.css` | `extension-src/scfs.css` | Hand-authored; CSS custom properties driven by block settings |
 
-Source lives in **`extension-src/*.ts`** (repo root) and imports `app/lib/filter-url.ts` directly,
+Both are minified. The stylesheet is built rather than copied so its comments cost nothing at
+runtime — it was within 300 bytes of the §17 budget when shipped raw, and minifying returned about
+3 KB of headroom. **Edit `extension-src/scfs.css`, never `assets/scfs.css`** — the latter is
+overwritten by every build.
+
+Source lives in **`extension-src/`** (repo root) and the bundle imports `app/lib/filter-url.ts` directly,
 so codec parity is guaranteed by the bundler rather than by a sync check. The source is deliberately
 **outside** the extension folder: Shopify's theme-extension bundler rejects any directory other than
 `assets`, `blocks`, `snippets`, and `locales`, so a `src/` inside the extension fails `shopify app
@@ -1038,12 +1098,90 @@ dev` with "Only assets, blocks, snippets, locales directories are allowed".
 
 ### 12.4 First paint and progressive enhancement
 
-`snippets/scfs-native-filters.liquid` renders Shopify's own `collection.filters` server-side, so the
-sidebar is usable before `scfs.js` runs and keeps working with JavaScript disabled. The runtime then
-replaces that markup with the merchant-configured version (labels, swatches, ordering, groups).
+**The page arrives complete.** This is a product block first and a filter app second, so Liquid — not
+JavaScript — renders the listing:
+
+- `snippets/scfs-product-card.liquid` renders every product in the grid, inside `{% paginate %}`,
+  with real `<a>` pagination links. It emits the same class names as `renderCard()` in
+  `extension-src/render-results.ts`, so one stylesheet describes both the server render and every
+  later AJAX render. **Change a class in one, change it in the other.**
+- The product count comes from `collection.products_count` / `search.results_count`, which is exact —
+  unlike the app's own total (Known Issue #2). `renderCount` therefore refuses to overwrite it with
+  an approximate figure while no filter is active.
+- `snippets/scfs-native-filters.liquid` renders Shopify's own `collection.filters`, so the sidebar is
+  usable and accurate before `scfs.js` runs. It shares the runtime's class names, which means it also
+  has to share its **structure**: `.scfs-range` is a column and `.scfs-range__fields` is the row
+  inside it, so omitting the row wrapper stacks the two price inputs into what looks like two empty
+  boxes with a stray dash between them.
+
+**The fallback controls are wired, not decorative.** `wireServerRenderedFilters` delegates a change
+listener on `[data-scfs-facets]` and translates Shopify's own inputs into store actions — they use
+the same `filter.*` grammar the runtime does (D10), so a checkbox becomes `toggleValue` and a
+`.gte`/`.lte` pair becomes `setRange`. It stands down once `renderFacets` sets
+`data-scfs-rendered="true"`, because from then on the controls carry their own listeners. Without
+this the fallback price inputs and checkboxes were inert markup. The whole sidebar is also a real
+`<form method="get">` with a `<noscript>` submit button, which is what makes it work with scripting
+off; with scripting on the runtime intercepts the submit, the change having already applied.
+
+**Nothing in the boot sequence may wait on the network to become interactive.** `wireToolbar` used to
+run after `await loadConfig()`, so an unreachable app proxy left the sort control with no listener at
+all — silently dead, with no error to show for it. Listeners are attached synchronously now and
+`syncToolbarOptions` fills the lists in afterwards; both proxy calls carry a 10s abort so a hanging
+request cannot wedge the runtime.
+
+**The `hidden` attribute needs help here.** The UA rule behind it is only `[hidden] { display: none }`,
+which any class in this stylesheet that sets `display` outranks — so a hidden element stays on screen.
+`.scfs [hidden] { display: none !important }` restates it with the weight to win. Everything the
+runtime toggles (`Clear all`, chips, the empty and error states, pagination, the drawer close button,
+the suggestions panel) depends on that one rule.
+
+Shopify applies `filter.*` and `page` params to `collection.products` itself, so a shared, refreshed
+or crawled filtered URL is already correct on first paint — with no app request and no JavaScript.
+
+**Boot hydrates, it does not re-render.** The one fetch made at boot carries `hydrate: true`, and the
+subscriber returns early on it after updating the sidebar, chips and active count. The grid, the
+pagination and the count are left exactly as Liquid wrote them. This is not an optimisation but a
+correctness rule: without it, a slow, failing or empty first response replaces a correct page with an
+empty one — which is precisely what "products come after reload then auto gone" was. Two paths used
+to do this and both are now guarded:
+
+- `renderGrid` cleared the grid whenever a response carried zero products.
+- `renderFacets` cleared the sidebar whenever a response carried zero facets, wiping the
+  server-rendered `collection.filters` markup along with it.
+
+From the first shopper interaction onward the runtime owns the grid normally, and the sidebar is
+already upgraded to the merchant-configured version (labels, swatches, ordering, groups).
+
+The block's `products_per_page` setting sizes that first render only; the app's own per-page setting
+takes over once the runtime owns the grid. A shopper arriving on a URL with `limit=48` therefore sees
+the block's page size first and 48 after hydration.
 
 Merchant presentation config is **not** available to Liquid at render time — mirroring it into an
 app-owned shop metafield would remove the swap entirely and is recorded as a Phase 18 optimisation.
+
+### 12.5 Desktop layouts
+
+Seven arrangements, defined once in `app/config/layouts.ts` and selected in **Filters → Layout**.
+Each `value` is simultaneously the `AppSettings.general.defaultLayout` value, the block's
+`desktop_layout` value, and the `.scfs-app--<value>` class the stylesheet keys off — adding one means
+touching the registry, the block schema and `scfs.css` together.
+
+| Value | Arrangement |
+| --- | --- |
+| `sidebar` | Filters in a sticky column beside the products (default) |
+| `offcanvas` | Filters open over the page from a Filter button; grid takes full width |
+| `collapsed` | Same drawer, closed until asked for |
+| `columns_1` | Filters across the top of the results, one per row |
+| `columns_2` | Filters across the top in two columns |
+| `columns_3` | Filters across the top in three columns |
+| `show_all` | Every filter open above the results, nothing collapsed or capped |
+
+`offcanvas` and `collapsed` keep the panel as an overlay at every width. `drawer.ts` decides whether
+to lock body scroll and trap focus by reading the panel's computed `position` rather than the layout
+name, so CSS stays the single authority on what is an overlay — including after the runtime resolves
+a layout the block deferred to the app.
+
+Mobile has its own three: `drawer` (slide-in), `fullscreen`, `inline` (filters in the page).
 
 ---
 
@@ -1058,31 +1196,53 @@ Overview cards (total filters, active filters, filter groups, configured collect
 searches, filter interactions) · Top Searches · Top Filters · Recent Activity (from `ActivityLog`) ·
 usage meters · onboarding checklist for first-run.
 
-### 13.2 Filters
+### 13.2 Filter tree
+
+The shop's ordered set of filter options. Collections may override it; unconfigured collections and
+the search page fall back to it (§8.5).
 
 ```text
-Filters                                              [+ Create Filter]
-──────────────────────────────────────────────────────────────────────
-Name     Type       Source     Group     Status    Actions
-Brand    Checkbox   Vendor     Product   Active    Edit Duplicate Delete
-Color    Swatch     Option     Style     Active    …
-Size     Checkbox   Option     Style     Active    …
-Price    Range      Price      —         Active    …
-Rating   Rating     Metafield  Reviews   Draft     …
-──────────────────────────────────────────────────────────────────────
+Default filter tree                             [Layout] [Add filter option]
+────────────────────────────────────────────────────────────────────────────
+Status  Label    Type              Display type   Value        Order  Actions
+ ●      Brand    Vendor            Checkbox       All values   ↑ ↓    Edit …
+ ●      Color    Option: Color     Color swatch   12 custom…   ↑ ↓    Edit …
+ ●      Size     Option: Size       Button/pill   All values   ↑ ↓    Edit …
+ ●      Price    Price             Range slider   —            ↑ ↓    Edit …
+ ○      Rating   Rating: reviews…  Rating         All values   ↑ ↓    Edit …
+────────────────────────────────────────────────────────────────────────────
+                                                        [+ Add filter option]
 ```
 
-Actions: edit, duplicate, delete (with confirmation), enable/disable, drag-to-reorder, bulk
-enable/disable/delete, search and filter the list. Empty state offers "Create your first filter"
-plus one-click starter presets (Color, Size, Price, Availability, Tag).
+Status is an `s-switch` that saves on change. Actions: edit, duplicate, delete (with confirmation),
+reorder.
 
-### 13.3 Filter builder
+**Starter set.** A shop with no filters falls back to Shopify's own facets — correct, but it shows
+none of what the merchant installed the app for, and building eight filters by hand before seeing
+anything is a poor first run. The empty state therefore offers one action that creates the set most
+catalogues need (`app/config/presets.ts`): availability, price, brand, product type, tag, plus colour
+and size **only when the catalogue actually has options by those names** — a swatch filter over an
+option no product uses would render empty. The same action is offered in the aside once filters
+exist, where it adds only what is missing; presets are matched on source + option name, so running it
+twice does not duplicate anything. It stops at the plan's filter limit.
 
-Stepped form: **Name → Data source → Source key → Display type → Values → Behaviour → Preview**.
-Behaviour options: show product count, hide empty values, multi-select, collapsed by default,
-searchable values, max visible values, value sort. Values tab manages `FilterValue` overrides:
-label, swatch colour, swatch image (Files picker), order, hide. A live preview renders the actual
-storefront markup. Invalid combinations are blocked with an inline reason, never a silent failure.
+### 13.3 Filter option builder
+
+**General** tab: option type (grouped Standard / Product option / Product metafield), option label,
+source key when the type needs one, display type, group. **Advanced** tab: show product count, hide
+empty values, multi-select, searchable values, values before scroll, value order, collapsed by
+default. A **Preview** panel beside the form renders the chosen display type with device and layout
+switches. Editing an existing option adds a Values tab for `FilterValue` overrides: label, swatch
+colour, swatch image, order, hide. Invalid combinations are blocked with an inline reason, never a
+silent failure.
+
+> **React 18 constraint.** Polaris web components are custom elements, and React 18 writes JSX
+> event props onto them as string attributes — an `onChange` on `<s-select>` never fires. Anything
+> reactive therefore reads the form element directly: `useFormValues` (live preview) and
+> `AutoSubmitForm` (status switches) attach real listeners, and controls that must reset when a
+> dependency changes carry a `key` so React remounts them. In-page tabs use native `<button>`
+> elements for the same reason. This is a live trap — the original builder's `onChange` handlers
+> were silently dead.
 
 ### 13.4 Collections
 
@@ -1093,8 +1253,11 @@ custom, pick filters/groups, reorder, per-collection layout and title overrides.
 
 - **Search**: configuration form, synonyms table, suggestions/redirects table.
 - **Analytics**: see §14.
-- **Settings**: general (engine, storefront behaviour), filters, search, appearance, analytics
-  (tracking on/off, retention), data (export/reset).
+- **Settings**: a hub of cards, each linking to the page that owns the setting —
+  `settings/general` (engine, per page, columns, pagination), `settings/appearance`,
+  `settings/analytics` (tracking, retention, prune), plus cards for filter layout, the filter tree,
+  collection trees, search, subscription and help. Cards link to real pages only; nothing on the hub
+  is a placeholder.
 - **Pricing**: plan comparison from `plans.server.ts`, current plan, upgrade/downgrade, usage.
 - **Help**: setup guide, block placement, theme compatibility, troubleshooting, contact.
 
@@ -1400,14 +1563,20 @@ routes including all three mandatory GDPR topics.
 `deriveTotalCount`, cursor-walking for numbered pages, LRU+TTL caching with webhook invalidation,
 and token-bucket rate limiting.
 
-**Theme extension** — 7 blocks plus the app embed, 2 snippets, locales, `scfs.js` (10.2 KB gzipped)
-and `scfs.css` (3.9 KB gzipped), both inside budget. Server-rendered no-JS fallback built from
-`collection.filters`.
+**Theme extension** — **one app block** (`products-filter`) plus the app embed, 3 snippets, locales,
+`scfs.js` (10.8 KB gzipped) and `scfs.css` (5.9 KB gzipped), both inside budget. The whole listing is
+server-rendered by Liquid — products, pagination and Shopify's own facets — so the page works
+complete with JavaScript disabled and costs no app request to load (§12.4). Seven desktop layouts and
+three mobile layouts, selectable in the admin and overridable per template. Grid/list switch
+remembered per shopper, scrolling value lists, in-facet value search, price slider with a tick scale,
+and a `+N` overflow pill on card swatches.
 
-**Admin** — 12 routes: dashboard, filter list and builder (all 10 display types, value overrides),
-groups, collections list and per-collection configuration, search configuration with synonyms and
-redirects, analytics with sparkline and CSV export, settings (general/appearance/analytics plus
-prune), pricing with real Shopify billing, and help.
+**Admin** — 15 routes: dashboard; filter tree with status switches, ordering and duplication; filter
+option builder with General/Advanced tabs, a grouped option-type picker and a live preview; layout
+picker with wireframe thumbnails (desktop/mobile/settings tabs); groups; collections list and
+per-collection configuration; search configuration with synonyms and redirects; analytics with
+sparkline and CSV export; a settings hub over general/appearance/analytics pages; pricing with real
+Shopify billing; and help.
 
 **Tests** — 109 passing across the URL codec (round-trip, clamping, injection), facet merge, filter
 mapping and count derivation, plan gating and validators, the proxy helpers (session hashing, rate
@@ -1423,11 +1592,14 @@ without breaking the storefront.
 
 ### Next Task
 
-1. `npm run dev`, install on a development store, enable the app embed and add **Product filters** to
-   the collection template.
-2. Walk the §18 E2E list; add Playwright specs as each scenario is confirmed.
-3. Seed roughly 10k products and measure the §17 budgets (Phase 18).
-4. Then Phase 19: switch `provider` to `postgresql`, regenerate migrations, security review.
+1. `npm run dev`, install on a development store, enable the app embed and add **Products & filter**
+   to the collection template.
+2. Verify the two things that cannot be checked locally: that `s-switch` change events reach
+   `AutoSubmitForm` (the filter tree's status toggles), and that each of the seven desktop layouts
+   renders as intended against a real theme's styles.
+3. Walk the §18 E2E list; add Playwright specs as each scenario is confirmed.
+4. Seed roughly 10k products and measure the §17 budgets (Phase 18).
+5. Then Phase 19: switch `provider` to `postgresql`, regenerate migrations, security review.
 
 ### Known Issues
 
@@ -1449,17 +1621,29 @@ without breaking the storefront.
    search pages; `SEARCH_SUPPORTED_SORTS` records this and a test pins it.
 5. **Still on SQLite.** D4 requires PostgreSQL for production. The schema is provider-portable, so
    this is a one-line `provider` change plus fresh migrations — but it must happen before launch.
-6. **Merchant filter configuration is invisible to Liquid**, so the sidebar swaps from Shopify's
-   native markup to the configured version once `scfs.js` boots. Mirroring configuration into an
-   app-owned shop metafield would remove the swap (Phase 18).
-7. **Engine Native does not AJAX-update the theme's own grid.** Without a `Product results` block,
-   native mode navigates, exactly as Shopify's own filtering does. Section Rendering API
-   auto-detection of the theme's product-grid section is not implemented.
+6. **Merchant filter configuration is invisible to Liquid**, so the *sidebar* swaps from Shopify's
+   native markup to the configured version once `scfs.js` boots, and the grid re-renders once with
+   it. The products themselves are correct from the first byte; what changes is filter labels,
+   swatches, ordering and grouping. Mirroring configuration into an app-owned shop metafield would
+   remove the swap entirely (Phase 18).
+7. **Every filter interaction costs one app request** (or zero on a cache hit). Engine Native's
+   zero-request path is gone with the single block — see §7. The §17 budget of "0 (Native) / 1 (App,
+   cache miss)" therefore reads as 1 on a miss, 0 on a hit, and the caching and abort behaviour has
+   to carry what Native used to.
 8. **No E2E coverage yet**, and nothing has been run against a real store or catalogue.
+9. **`s-switch` auto-submit is unverified.** The filter tree's status toggles save through
+   `AutoSubmitForm`, which listens for `change`/`input` bubbling out of the custom element. That is
+   how form-associated custom elements normally behave, but it has not been observed in a real
+   admin. If a toggle turns out not to save, the fallback is a submit button in that cell.
+10. **Theme Check flags `scfs.js` under `AssetSizeJavaScript`** — 34 KB raw against its 10 KB
+    default, which measures the uncompressed file. What ships is 10.9 KB gzipped, inside the §17
+    budget of 25 KB. The CLI's own bundler does not reject it; if `shopify app deploy` ever does,
+    the fix is a `.theme-check.yml` override in the extension or splitting the bundle.
 
 ### TODO (near term)
 
 * Install on a development store and work through the §18 E2E scenarios.
+* Confirm the filter tree's status switches save, and screenshot all seven desktop layouts.
 * Add Playwright and specs; wire `npm run check` into CI.
 * Verify both predictive tiers, the billing upgrade/downgrade/cancel cycle, and over-quota
   degradation on a real store.

@@ -64,7 +64,10 @@ export function configureAnalytics(settings: {
   trackSearches: boolean;
   trackFilters: boolean;
 }): void {
-  enabled = { searches: settings.trackSearches, filters: settings.trackFilters };
+  enabled = {
+    searches: settings.trackSearches,
+    filters: settings.trackFilters,
+  };
 }
 
 export function track(event: Event): void {

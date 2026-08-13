@@ -4,58 +4,35 @@ import type { LoaderFunctionArgs } from "react-router";
 import { useLoaderData } from "react-router";
 import { requireAdminContext } from "../services/shop/context.server";
 import { countFilters } from "../models/filter.server";
-import { getSettings } from "../models/settings.server";
 
 const BLOCKS = [
   {
-    name: "Product filters",
-    where: "Collection page, in the sidebar or above the product grid",
-    what: "The configured filters, with a drawer on mobile.",
+    name: "Stable Filter & Search",
+    kind: "App embed",
+    where: "Theme editor → App embeds",
+    what: "Loads the script and styles once per page. Turn this on first.",
   },
   {
-    name: "Product search",
-    where: "Collection or search page, above the results",
-    what: "A search field with predictive suggestions.",
-  },
-  {
-    name: "Filters + search",
-    where: "Collection page",
-    what: "Both of the above in one block, if you prefer a single placement.",
-  },
-  {
-    name: "Active filters",
-    where: "Directly above the product grid",
-    what: "Removable chips for each active filter, plus clear all.",
-  },
-  {
-    name: "Filter toolbar",
-    where: "Above the product grid",
-    what: "Product count, sort and products-per-page controls.",
-  },
-  {
-    name: "Product results",
-    where: "Collection or search page, replacing the theme's grid",
-    what: "Only needed when running the app engine or on search pages.",
+    name: "Products & filter",
+    kind: "App block",
+    where: "Collection or search template, where the product grid should go",
+    what: "Everything else: the search field, the filters, the toolbar, active filter chips, the product grid and pagination — in one block.",
   },
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop, plan } = await requireAdminContext(request);
-  const [filterCount, settings] = await Promise.all([
-    countFilters(shop.id, { enabledOnly: true }),
-    getSettings(shop.id),
-  ]);
+  const filterCount = await countFilters(shop.id, { enabledOnly: true });
 
   return {
     shopDomain: shop.domain,
     filterCount,
-    engine: settings.general.engine,
     planName: plan.name,
   };
 };
 
 export default function Help() {
-  const { shopDomain, filterCount, engine, planName } = useLoaderData<typeof loader>();
+  const { shopDomain, filterCount, planName } = useLoaderData<typeof loader>();
   const themeEditorUrl = `https://${shopDomain}/admin/themes/current/editor`;
 
   return (
@@ -81,9 +58,10 @@ export default function Help() {
             per page.
           </s-list-item>
           <s-list-item>
-            <strong>Add the blocks.</strong> On your collection template, add{" "}
-            <strong>Product filters</strong> and, if you want them,{" "}
-            <strong>Filter toolbar</strong> and <strong>Active filters</strong>.
+            <strong>Add the block.</strong> On your collection template, add{" "}
+            <strong>Products &amp; filter</strong>. One block carries the search
+            field, the filters, the toolbar and the product grid — there is
+            nothing else to place.
           </s-list-item>
         </s-ordered-list>
 
@@ -92,10 +70,11 @@ export default function Help() {
         </s-button>
       </s-section>
 
-      <s-section heading="Where each block goes">
+      <s-section heading="What to add, and where">
         <s-table>
           <s-table-header-row>
-            <s-table-header>Block</s-table-header>
+            <s-table-header>Name</s-table-header>
+            <s-table-header>Type</s-table-header>
             <s-table-header>Where to add it</s-table-header>
             <s-table-header>What it does</s-table-header>
           </s-table-header-row>
@@ -105,6 +84,7 @@ export default function Help() {
                 <s-table-cell>
                   <strong>{block.name}</strong>
                 </s-table-cell>
+                <s-table-cell>{block.kind}</s-table-cell>
                 <s-table-cell>{block.where}</s-table-cell>
                 <s-table-cell>{block.what}</s-table-cell>
               </s-table-row>
@@ -152,11 +132,10 @@ export default function Help() {
           <s-box padding="base" borderWidth="base" borderRadius="base">
             <s-heading>Filtering reloads the page instead of updating in place</s-heading>
             <s-paragraph>
-              That is the native engine working as intended — your theme renders the
-              products, which is the fastest option. Add the{" "}
-              <strong>Product results</strong> block, or set the engine to{" "}
-              <em>App</em> in settings, to have the app render the grid and update
-              without a reload. Current engine setting: <code>{engine}</code>.
+              The <strong>Products &amp; filter</strong> block updates in place, so
+              a reload means your theme&apos;s own product section is still on the
+              template and handling the filter links. Remove that section — the
+              block replaces it, including the grid and pagination.
             </s-paragraph>
           </s-box>
 

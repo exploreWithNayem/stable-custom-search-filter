@@ -12,11 +12,8 @@ import {
 import { listFilters } from "../models/filter.server";
 import { recordActivity } from "../models/activity.server";
 import { invalidateShop } from "../lib/cache.server";
-import {
-  LAYOUTS,
-  collectionFilterInputSchema,
-  parseInput,
-} from "../lib/validation";
+import { collectionFilterInputSchema, parseInput } from "../lib/validation";
+import { DESKTOP_LAYOUT_DEFINITIONS } from "../config/layouts";
 import { isOverLimit, planAllows } from "../config/plans";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -176,9 +173,9 @@ export default function CollectionConfig() {
             />
 
             <s-select name="layout" label="Layout" value={config.layout}>
-              {LAYOUTS.map((layout) => (
-                <s-option key={layout} value={layout}>
-                  {layout.charAt(0).toUpperCase() + layout.slice(1)}
+              {DESKTOP_LAYOUT_DEFINITIONS.map((definition) => (
+                <s-option key={definition.value} value={definition.value}>
+                  {definition.label}
                 </s-option>
               ))}
             </s-select>

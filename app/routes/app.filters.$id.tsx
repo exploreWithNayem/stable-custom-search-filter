@@ -150,7 +150,7 @@ export default function EditFilter() {
       {searchParams.get("created") ? (
         <s-banner tone="success" heading="Filter created">
           <s-paragraph>
-            Add the <strong>Product filters</strong> block to your collection
+            Add the <strong>Products &amp; filter</strong> block to your collection
             template in the theme editor to show it on the storefront.
           </s-paragraph>
         </s-banner>

@@ -30,6 +30,13 @@ export interface StoreSnapshot {
   result: ProductsResponse | null;
   status: Status;
   activeCount: number;
+  /**
+   * True for the one fetch made at boot. Liquid has already rendered the
+   * products, the pagination and the count for this exact URL, so that
+   * response is used only to upgrade the sidebar to the merchant's configured
+   * filters — it must never touch the grid.
+   */
+  hydrating: boolean;
 }
 
 type Listener = (snapshot: StoreSnapshot) => void;
@@ -45,6 +52,7 @@ let state: FilterState = parseFilterState(window.location.search);
 let config: ConfigResponse | null = null;
 let result: ProductsResponse | null = null;
 let status: Status = "idle";
+let hydrating = false;
 
 const listeners = new Set<Listener>();
 
@@ -55,6 +63,7 @@ function snapshot(): StoreSnapshot {
     result,
     status,
     activeCount: activeFilterCount(state),
+    hydrating,
   };
 }
 
@@ -89,15 +98,34 @@ function collectionHandle(): string | null {
   return readContext().context.collection || null;
 }
 
+/**
+ * Ceiling on any proxy request.
+ *
+ * A misconfigured app proxy can leave a request pending indefinitely, and the
+ * boot sequence awaits its config call — without a ceiling that stalls
+ * everything queued behind it. `AbortSignal.timeout` is not available
+ * everywhere this has to run, so the timer is explicit.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
+function abortAfter(ms: number): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, done: () => window.clearTimeout(timer) };
+}
+
 export async function loadConfig(): Promise<ConfigResponse | null> {
   const { proxy } = readContext();
   const params = new URLSearchParams();
   const handle = collectionHandle();
   if (handle) params.set("collection", handle);
 
+  const timeout = abortAfter(REQUEST_TIMEOUT_MS);
+
   try {
     const response = await fetch(`${proxy}/config?${params.toString()}`, {
       headers: { Accept: "application/json" },
+      signal: timeout.signal,
     });
     if (!response.ok) return null;
 
@@ -112,21 +140,29 @@ export async function loadConfig(): Promise<ConfigResponse | null> {
     return config;
   } catch {
     return null;
+  } finally {
+    timeout.done();
   }
 }
 
-export async function loadResults(): Promise<void> {
+export async function loadResults(
+  options: { hydrate?: boolean } = {},
+): Promise<void> {
   const { proxy } = readContext();
   const requestId = ++sequence;
 
   inFlight?.abort();
   const controller = new AbortController();
   inFlight = controller;
+  const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+  hydrating = options.hydrate === true;
   status = "loading";
   emit();
 
-  const params = new URLSearchParams(filterStateToSearch(state).replace(/^\?/, ""));
+  const params = new URLSearchParams(
+    filterStateToSearch(state).replace(/^\?/, ""),
+  );
   const handle = collectionHandle();
   if (handle) params.set("collection", handle);
 
@@ -154,6 +190,7 @@ export async function loadResults(): Promise<void> {
     status = "error";
     emit();
   } finally {
+    window.clearTimeout(timer);
     if (inFlight === controller) inFlight = null;
   }
 }

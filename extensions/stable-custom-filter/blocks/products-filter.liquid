@@ -1,0 +1,694 @@
+{% comment %}
+  The app's single storefront block (CLAUDE.md §12.1).
+
+  "Products & filter" is the collection page's product listing, whole: the
+  grid, pagination, the filters, the search field, the toolbar and the active
+  filter chips. It replaces the theme's own product section rather than sitting
+  beside it — there is no arrangement to get wrong and no way to end up with a
+  grid that has no filters or filters that drive nothing.
+
+  **The products are rendered here, by Liquid.** The page arrives complete: all
+  the products, paginated, with no JavaScript involved and no app request. That
+  is the product block doing its job. Search and filtering then refine what is
+  already on screen, and only at that point does the runtime take the grid over.
+  Shopify applies `filter.*` and `page` params to `collection.products` itself,
+  so a shared or refreshed filtered URL is also correct on first paint.
+
+  Layout is a setting, not a different block — see `data-scfs-desktop-layout`
+  and the `.scfs-app--<layout>` rules in scfs.css.
+
+  Schema note: a theme app extension block may declare at most 6 non-interactive
+  settings — `header` and `paragraph` share one allowance. The six section
+  headers below use all of it, so anything explanatory has to go in an `info` on
+  the setting it describes rather than in a paragraph of its own.
+{% endcomment %}
+
+{% render 'scfs-context' %}
+
+{%- liquid
+  comment
+    "auto" means "whatever the app admin says". Liquid cannot read app settings,
+    so the runtime resolves it from the proxy config on boot; until then the
+    default sidebar rules apply, which is the layout most merchants pick.
+  endcomment
+  assign layout = block.settings.desktop_layout
+  if layout == 'auto' or layout == blank
+    assign layout = 'sidebar'
+    assign layout_auto = true
+  endif
+
+  assign search_placeholder = block.settings.search_placeholder
+  if search_placeholder == blank
+    assign search_placeholder = 'search.placeholder' | t
+  endif
+
+  comment
+    The block serves collection and search templates; everywhere else there is
+    no product list to render and the grid stays empty until the runtime asks
+    the proxy for one.
+  endcomment
+  assign items = collection.products
+  assign items_count = collection.products_count
+  if template.name == 'search'
+    assign items = search.results
+    assign items_count = search.results_count
+  endif
+
+  comment
+    On any other template both are nil, and `paginate` needs a real list. This
+    is Liquid's way of writing an empty array.
+  endcomment
+  unless items
+    assign items = '' | split: ','
+    assign items_count = 0
+  endunless
+
+  comment
+    Select settings are strings; `paginate` needs a number, and `plus: 0` is
+    how Liquid coerces one.
+  endcomment
+  assign per_page = block.settings.products_per_page | plus: 0
+  if per_page < 1
+    assign per_page = 24
+  endif
+-%}
+
+<div
+  class="scfs scfs-app scfs-app--{{ layout }} scfs-app--aside-{{ block.settings.sidebar_position }} scfs-spacing--{{ block.settings.spacing }}"
+  data-scfs-app
+  data-scfs-desktop-layout="{{ layout }}"
+  data-scfs-mobile-layout="{{ block.settings.mobile_layout | default: 'auto' }}"
+  {% if layout_auto %}data-scfs-layout-auto="true"{% endif %}
+  style="
+    --scfs-accent: {{ block.settings.accent_color }};
+    --scfs-radius: {{ block.settings.border_radius }}px;
+    --scfs-aside-width: {{ block.settings.sidebar_width }}px;
+    {%- if block.settings.content_width != 'page' %}
+      --scfs-max-width: {{ block.settings.content_width }}px;
+    {%- endif %}
+    --scfs-columns: {{ block.settings.columns }};
+    --scfs-columns-mobile: {{ block.settings.columns_mobile }};
+  "
+  {{ block.shopify_attributes }}
+>
+  {%- comment -%}
+    Mobile control bar. It is also the desktop trigger for the off-canvas and
+    collapsed layouts, which is why it lives outside the mobile media query and
+    is hidden by layout rules rather than by Liquid.
+  {%- endcomment -%}
+  <div class="scfs-bar" data-scfs-bar>
+    <button
+      type="button"
+      class="scfs-bar__button"
+      data-scfs-drawer-open
+      aria-expanded="false"
+      aria-controls="scfs-panel-{{ block.id }}"
+    >
+      <span class="scfs-bar__icon" aria-hidden="true"></span>
+      <span>{{ 'filters.open' | t }}</span>
+      <span class="scfs-bar__count" data-scfs-active-count hidden>0</span>
+    </button>
+
+    {%- if block.settings.show_sort -%}
+      <label class="scfs-bar__sort">
+        <span class="scfs-visually-hidden">{{ 'toolbar.sort' | t }}</span>
+        <select data-scfs-sort aria-label="{{ 'toolbar.sort' | t }}">
+          <option value="manual">Featured</option>
+        </select>
+      </label>
+    {%- endif -%}
+  </div>
+
+  <div class="scfs-app__layout">
+    {%- comment -%} ── Filters ─────────────────────────────────────────────── {%- endcomment -%}
+    <aside
+      class="scfs-sidebar"
+      data-scfs-sidebar
+      data-scfs-layout="{{ layout }}"
+      data-scfs-show-counts="{{ block.settings.show_counts }}"
+      data-scfs-mobile-drawer="true"
+      aria-label="{{ block.settings.filters_title | default: 'Filters' }}"
+    >
+      <div class="scfs-sidebar__panel" id="scfs-panel-{{ block.id }}" data-scfs-panel>
+        <div class="scfs-sidebar__header">
+          {%- if block.settings.filters_title != blank -%}
+            <h2 class="scfs-sidebar__title">{{ block.settings.filters_title }}</h2>
+          {%- endif -%}
+          <button
+            type="button"
+            class="scfs-drawer-close"
+            data-scfs-drawer-close
+            aria-label="{{ 'filters.close' | t }}"
+            hidden
+          >
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+
+        <button type="button" class="scfs-clear-all" data-scfs-clear-all hidden>
+          {{ 'filters.clear_all' | t }}
+        </button>
+
+        {%- comment -%}
+          Server-rendered from Shopify's own facets so the sidebar is usable
+          before scfs.js runs and keeps working without JavaScript (§12.4).
+          The runtime replaces it with the merchant-configured version.
+
+          A real GET form, because that is what makes it work with scripting
+          off: Shopify reads `filter.*` and `sort_by` straight off the query
+          string. With scripting on the runtime intercepts the submit, having
+          already applied the change.
+        {%- endcomment -%}
+        <form
+          method="get"
+          action="{{ collection.url | default: routes.search_url }}"
+          data-scfs-filter-form
+        >
+          {%- if template.name == 'search' -%}
+            <input type="hidden" name="type" value="product">
+            {%- if search.terms != blank -%}
+              <input type="hidden" name="q" value="{{ search.terms | escape }}">
+            {%- endif -%}
+          {%- endif -%}
+          {%- if collection.sort_by != blank -%}
+            <input type="hidden" name="sort_by" value="{{ collection.sort_by }}">
+          {%- endif -%}
+
+          <div class="scfs-facets" data-scfs-facets>
+            {%- if collection.filters.size > 0 -%}
+              {% render 'scfs-native-filters',
+                filters: collection.filters,
+                show_counts: block.settings.show_counts
+              %}
+            {%- endif -%}
+          </div>
+
+          {%- comment -%}
+            Its own class: `.scfs-apply` is the drawer's button and is hidden
+            by default, which would make this invisible in exactly the case it
+            exists for.
+          {%- endcomment -%}
+          <noscript>
+            <button type="submit" class="scfs-apply-nojs">
+              {{ 'filters.apply' | t }}
+            </button>
+          </noscript>
+        </form>
+
+        <div class="scfs-drawer__footer">
+          <button type="button" class="scfs-apply" data-scfs-drawer-apply>
+            {{ 'filters.apply' | t }}
+          </button>
+        </div>
+      </div>
+
+      <div class="scfs-drawer__scrim" data-scfs-drawer-scrim hidden></div>
+    </aside>
+
+    {%- comment -%} ── Search, toolbar, results ────────────────────────────── {%- endcomment -%}
+    <div class="scfs-app__main">
+      {%- if block.settings.show_search -%}
+        <div
+          class="scfs-search scfs-search--inline"
+          data-scfs-search
+          data-scfs-min-chars="{{ block.settings.min_chars }}"
+          data-scfs-debounce="250"
+          data-scfs-predictive="{{ block.settings.predictive_search }}"
+          data-scfs-filter-results="true"
+        >
+          <form
+            class="scfs-search__form"
+            action="{{ routes.search_url }}"
+            method="get"
+            role="search"
+            data-scfs-search-form
+          >
+            <input type="hidden" name="type" value="product">
+            <label class="scfs-visually-hidden" for="scfs-search-{{ block.id }}">
+              {{ search_placeholder }}
+            </label>
+            <div class="scfs-search__field">
+              <input
+                id="scfs-search-{{ block.id }}"
+                class="scfs-search__input"
+                type="search"
+                name="q"
+                value="{{ search.terms | escape }}"
+                placeholder="{{ search_placeholder }}"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="scfs-suggest-{{ block.id }}"
+                aria-autocomplete="list"
+                data-scfs-search-input
+              >
+              <button
+                type="submit"
+                class="scfs-search__submit"
+                aria-label="{{ 'search.submit' | t }}"
+              >
+                <span class="scfs-search__icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div
+              id="scfs-suggest-{{ block.id }}"
+              class="scfs-search__results"
+              data-scfs-search-results
+              role="listbox"
+              aria-label="{{ 'search.suggestions' | t }}"
+              hidden
+            ></div>
+          </form>
+        </div>
+      {%- endif -%}
+
+      <div class="scfs-toolbar" data-scfs-toolbar>
+        {%- if block.settings.show_view_switch -%}
+          <div class="scfs-view" role="group" aria-label="{{ 'toolbar.view_as' | t }}">
+            <span class="scfs-view__label">{{ 'toolbar.view_as' | t }}</span>
+            <button
+              type="button"
+              class="scfs-view__button scfs-view__button--grid"
+              data-scfs-view="grid"
+              aria-pressed="true"
+              aria-label="{{ 'toolbar.view_grid' | t }}"
+            >
+              <span aria-hidden="true"></span>
+            </button>
+            <button
+              type="button"
+              class="scfs-view__button scfs-view__button--list"
+              data-scfs-view="list"
+              aria-pressed="false"
+              aria-label="{{ 'toolbar.view_list' | t }}"
+            >
+              <span aria-hidden="true"></span>
+            </button>
+          </div>
+        {%- endif -%}
+
+        {%- if block.settings.show_count -%}
+          <p class="scfs-toolbar__count" data-scfs-count aria-live="polite">
+            {%- if items_count -%}
+              {{ 'toolbar.product_count' | t: count: items_count }}
+            {%- endif -%}
+          </p>
+        {%- endif -%}
+
+        <div class="scfs-toolbar__controls">
+          {%- if block.settings.show_per_page -%}
+            <label class="scfs-select">
+              <span class="scfs-select__label">{{ 'toolbar.show' | t }}</span>
+              <select data-scfs-per-page>
+                {%- assign options = '12,24,36,48' | split: ',' -%}
+                {%- for option in options -%}
+                  <option value="{{ option }}">{{ option }}</option>
+                {%- endfor -%}
+              </select>
+            </label>
+          {%- endif -%}
+
+          {%- if block.settings.show_sort -%}
+            <label class="scfs-select">
+              <span class="scfs-select__label">{{ 'toolbar.sort' | t }}</span>
+              <select data-scfs-sort>
+                {%- comment -%}
+                  Replaced by the script with the app's sort list so the admin
+                  and the storefront cannot drift. These are the no-JS defaults.
+                {%- endcomment -%}
+                <option value="manual">Featured</option>
+                <option value="best-selling">Best selling</option>
+                <option value="title-ascending">Alphabetically, A-Z</option>
+                <option value="title-descending">Alphabetically, Z-A</option>
+                <option value="price-ascending">Price, low to high</option>
+                <option value="price-descending">Price, high to low</option>
+                <option value="created-descending">Newest</option>
+                <option value="created-ascending">Oldest</option>
+              </select>
+            </label>
+          {%- endif -%}
+        </div>
+      </div>
+
+      {%- if block.settings.show_active_filters -%}
+        <div class="scfs-active" data-scfs-active-filters hidden>
+          <ul class="scfs-active__list" data-scfs-chips role="list"></ul>
+          <button type="button" class="scfs-active__clear" data-scfs-clear-all hidden>
+            {{ 'filters.clear_all' | t }}
+          </button>
+        </div>
+      {%- endif -%}
+
+      <div
+        class="scfs-results"
+        data-scfs-results
+        data-scfs-columns="{{ block.settings.columns }}"
+        data-scfs-columns-mobile="{{ block.settings.columns_mobile }}"
+        data-scfs-pagination="{{ block.settings.pagination }}"
+        data-scfs-show-vendor="{{ block.settings.show_vendor }}"
+        data-scfs-show-rating="{{ block.settings.show_rating }}"
+        data-scfs-show-swatches="{{ block.settings.show_swatches }}"
+        data-scfs-show-second-image="{{ block.settings.show_second_image }}"
+        data-scfs-image-ratio="{{ block.settings.image_ratio }}"
+        data-scfs-view-switch="{{ block.settings.show_view_switch }}"
+      >
+        {%- paginate items by per_page -%}
+          <div class="scfs-results__grid" data-scfs-grid aria-busy="false">
+            {%- for product in items -%}
+              {% render 'scfs-product-card',
+                product: product,
+                index: forloop.index0,
+                show_vendor: block.settings.show_vendor,
+                show_rating: block.settings.show_rating,
+                show_swatches: block.settings.show_swatches,
+                show_second_image: block.settings.show_second_image,
+                image_ratio: block.settings.image_ratio
+              %}
+            {%- endfor -%}
+          </div>
+
+          {%- comment -%}
+            `unless == 0` rather than `if > 0`, because a nil count is not
+            greater than zero and would leave the empty state showing.
+          {%- endcomment -%}
+          <div class="scfs-results__empty" data-scfs-empty
+            {%- unless items_count == 0 %} hidden{% endunless %}>
+            <p>{{ 'products.empty' | t }}</p>
+            <button type="button" class="scfs-clear-all" data-scfs-clear-all>
+              {{ 'products.empty_action' | t }}
+            </button>
+          </div>
+
+          <div class="scfs-results__error" data-scfs-error role="alert" hidden>
+            <p>{{ 'products.error' | t }}</p>
+          </div>
+
+          {%- comment -%}
+            Real anchors, so pagination is crawlable and works without
+            JavaScript (§10.7). The runtime replaces this nav with its own
+            buttons the first time it renders results.
+          {%- endcomment -%}
+          <nav class="scfs-pagination" data-scfs-pagination aria-label="Pagination"
+            {% if paginate.pages <= 1 %}hidden{% endif %}>
+            {%- if paginate.previous -%}
+              <a class="scfs-page scfs-page--prev" href="{{ paginate.previous.url }}">
+                {{ 'pagination.previous' | t }}
+              </a>
+            {%- endif -%}
+
+            {%- for part in paginate.parts -%}
+              {%- if part.is_link -%}
+                <a class="scfs-page" href="{{ part.url }}">{{ part.title }}</a>
+              {%- elsif part.title == '&hellip;' -%}
+                <span class="scfs-page-ellipsis">…</span>
+              {%- else -%}
+                <span class="scfs-page scfs-page--current" aria-current="page">
+                  {{- part.title -}}
+                </span>
+              {%- endif -%}
+            {%- endfor -%}
+
+            {%- if paginate.next -%}
+              <a class="scfs-page scfs-page--next" href="{{ paginate.next.url }}">
+                {{ 'pagination.next' | t }}
+              </a>
+            {%- endif -%}
+          </nav>
+        {%- endpaginate -%}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Products & filter",
+  "target": "section",
+  "stylesheet": "scfs.css",
+  "javascript": "scfs.js",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "select",
+      "id": "desktop_layout",
+      "label": "Desktop layout",
+      "info": "Leave on \"Use the app setting\" to follow Filters → Layout in the app. Any other choice overrides it for this template only.",
+      "options": [
+        { "value": "auto", "label": "Use the app setting" },
+        { "value": "sidebar", "label": "Default — left side" },
+        { "value": "offcanvas", "label": "Off canvas — left side" },
+        { "value": "collapsed", "label": "Collapsed — expand" },
+        { "value": "columns_1", "label": "One column per filter option" },
+        { "value": "columns_2", "label": "Two columns per filter option" },
+        { "value": "columns_3", "label": "Three columns per filter option" },
+        { "value": "show_all", "label": "Show all filter options" }
+      ],
+      "default": "auto"
+    },
+    {
+      "type": "select",
+      "id": "mobile_layout",
+      "label": "Mobile layout",
+      "options": [
+        { "value": "auto", "label": "Use the app setting" },
+        { "value": "drawer", "label": "Filter button — off canvas" },
+        { "value": "fullscreen", "label": "Filter button — full screen" },
+        { "value": "inline", "label": "Filters above results" }
+      ],
+      "default": "drawer"
+    },
+    {
+      "type": "select",
+      "id": "content_width",
+      "label": "Content width",
+      "info": "Caps how wide the listing gets and centres it. Choose \"Follow the theme\" if your collection section already constrains its width.",
+      "options": [
+        { "value": "page", "label": "Follow the theme" },
+        { "value": "1100", "label": "Narrow — 1100px" },
+        { "value": "1300", "label": "Medium — 1300px" },
+        { "value": "1500", "label": "Wide — 1500px" },
+        { "value": "1800", "label": "Extra wide — 1800px" }
+      ],
+      "default": "1300"
+    },
+    {
+      "type": "select",
+      "id": "sidebar_position",
+      "label": "Filter position",
+      "options": [
+        { "value": "left", "label": "Left" },
+        { "value": "right", "label": "Right" }
+      ],
+      "default": "left"
+    },
+    {
+      "type": "range",
+      "id": "sidebar_width",
+      "label": "Filter width",
+      "min": 200,
+      "max": 380,
+      "step": 20,
+      "unit": "px",
+      "default": 260
+    },
+    {
+      "type": "text",
+      "id": "filters_title",
+      "label": "Filters heading",
+      "info": "Which filter options appear, and in what order, is configured in the app under Filters.",
+      "default": "Filters"
+    },
+    {
+      "type": "select",
+      "id": "spacing",
+      "label": "Spacing",
+      "options": [
+        { "value": "compact", "label": "Compact" },
+        { "value": "base", "label": "Default" },
+        { "value": "loose", "label": "Loose" }
+      ],
+      "default": "base"
+    },
+    {
+      "type": "header",
+      "content": "Search"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_search",
+      "label": "Show search field",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "search_placeholder",
+      "label": "Placeholder",
+      "default": "Search for products in this collection"
+    },
+    {
+      "type": "checkbox",
+      "id": "predictive_search",
+      "label": "Show suggestions while typing",
+      "default": true
+    },
+    {
+      "type": "range",
+      "id": "min_chars",
+      "label": "Minimum characters",
+      "min": 1,
+      "max": 6,
+      "step": 1,
+      "default": 2
+    },
+    {
+      "type": "header",
+      "content": "Toolbar"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_view_switch",
+      "label": "Show grid / list switch",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_count",
+      "label": "Show product count",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_sort",
+      "label": "Show sort control",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_per_page",
+      "label": "Show products per page",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_active_filters",
+      "label": "Show active filter chips",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_counts",
+      "label": "Show product counts on filter values",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Product grid"
+    },
+    {
+      "type": "select",
+      "id": "products_per_page",
+      "label": "Products per page",
+      "info": "Used for the products rendered with the page. Once a shopper filters or sorts, the app's own setting takes over.",
+      "options": [
+        { "value": "12", "label": "12" },
+        { "value": "24", "label": "24" },
+        { "value": "36", "label": "36" },
+        { "value": "48", "label": "48" }
+      ],
+      "default": "24"
+    },
+    {
+      "type": "range",
+      "id": "columns",
+      "label": "Columns on desktop",
+      "min": 2,
+      "max": 5,
+      "step": 1,
+      "default": 3
+    },
+    {
+      "type": "select",
+      "id": "columns_mobile",
+      "label": "Columns on mobile",
+      "options": [
+        { "value": "1", "label": "1" },
+        { "value": "2", "label": "2" }
+      ],
+      "default": "2"
+    },
+    {
+      "type": "select",
+      "id": "image_ratio",
+      "label": "Image ratio",
+      "options": [
+        { "value": "adapt", "label": "Adapt to image" },
+        { "value": "square", "label": "Square" },
+        { "value": "portrait", "label": "Portrait" },
+        { "value": "landscape", "label": "Landscape" }
+      ],
+      "default": "adapt"
+    },
+    {
+      "type": "select",
+      "id": "pagination",
+      "label": "Pagination style",
+      "options": [
+        { "value": "numbered", "label": "Numbered pages" },
+        { "value": "load_more", "label": "Load more button" }
+      ],
+      "default": "numbered"
+    },
+    {
+      "type": "header",
+      "content": "Product card"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_vendor",
+      "label": "Show vendor",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_rating",
+      "label": "Show rating",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_swatches",
+      "label": "Show colour swatches",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_second_image",
+      "label": "Show second image on hover",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent colour",
+      "default": "#1a1a1a"
+    },
+    {
+      "type": "range",
+      "id": "border_radius",
+      "label": "Corner radius",
+      "min": 0,
+      "max": 24,
+      "step": 2,
+      "unit": "px",
+      "default": 4
+    }
+  ]
+}
+{% endschema %}

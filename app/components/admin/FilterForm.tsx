@@ -1,21 +1,30 @@
 /**
- * Filter builder form (CLAUDE.md §35, §13.3).
+ * Filter option builder (CLAUDE.md §35, §13.3).
  *
- * Shared by the create and edit routes so the two can never drift. Validation
- * is server-side (zod); this component only renders the errors it is handed.
+ * Shared by the create and edit routes so the two can never drift. General
+ * settings, advanced behaviour and a live preview, mirroring the "add filter
+ * option" flow merchants expect from this category of app.
+ *
+ * Validation is server-side (zod); this component only renders the errors it
+ * is handed. It reads its own live values from the form element rather than
+ * from `onChange` props: Polaris controls are custom elements, and React 18
+ * writes JSX event props onto them as attributes, where they never fire.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Form } from "react-router";
 import {
   FILTER_DISPLAY_LABELS,
-  FILTER_SOURCES,
   FILTER_SOURCE_DEFINITIONS,
   VALUE_SORTS,
+  groupedFilterSources,
+  isFilterDisplayType,
   isFilterSource,
   type FilterDisplayType,
   type FilterSource,
 } from "../../config/filter-types";
+import { FilterPreview } from "./FilterPreview";
+import { Tabs, useFormValues } from "./ui";
 
 export interface FilterFormValues {
   id?: string;
@@ -52,6 +61,13 @@ export interface FilterFormProps {
   /** Sources the current plan cannot use, with the reason. */
   lockedSources?: Partial<Record<FilterSource, string>>;
 }
+
+const TABS = [
+  { id: "general", label: "General" },
+  { id: "advanced", label: "Advanced" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 /**
  * Boolean form field. The hidden "false" input means an unchecked box still
@@ -92,9 +108,13 @@ export function FilterForm({
   submitLabel,
   lockedSources = {},
 }: FilterFormProps) {
-  const [source, setSource] = useState(values.source);
-  const [displayType, setDisplayType] = useState(values.displayType);
-  const [sourceKey, setSourceKey] = useState(values.sourceKey ?? "");
+  const formRef = useRef<HTMLFormElement>(null);
+  const live = useFormValues(formRef);
+  const [tab, setTab] = useState<TabId>("general");
+
+  const source = live.source ?? values.source;
+  const sourceKey = live.sourceKey ?? values.sourceKey ?? "";
+  const name = live.name ?? values.name;
 
   const definition = isFilterSource(source)
     ? FILTER_SOURCE_DEFINITIONS[source]
@@ -103,16 +123,19 @@ export function FilterForm({
   const allowedDisplayTypes: readonly FilterDisplayType[] =
     definition?.allowedDisplayTypes ?? [];
 
-  // Keep the display type valid whenever the source changes.
+  // The display type select is remounted whenever the source changes (see the
+  // `key` below), so its live value can lag by one render — fall back to the
+  // source's default rather than showing a type this source cannot use.
+  const candidate = live.displayType ?? values.displayType;
   const effectiveDisplayType = allowedDisplayTypes.includes(
-    displayType as FilterDisplayType,
+    candidate as FilterDisplayType,
   )
-    ? displayType
-    : (definition?.defaultDisplayType ?? displayType);
+    ? candidate
+    : (definition?.defaultDisplayType ?? candidate);
 
   const sourceKeyOptions: SourceKeyOption[] =
     source === "product_option" || source === "variant_option"
-      ? optionNames.map((name) => ({ value: name, label: name }))
+      ? optionNames.map((option) => ({ value: option, label: option }))
       : source === "product_metafield" || source === "rating"
         ? productMetafields
         : source === "variant_metafield"
@@ -127,217 +150,253 @@ export function FilterForm({
     effectiveDisplayType,
   );
 
+  // A fragment, not a wrapper: `slot="aside"` only projects when the section
+  // is a direct child of `s-page`, and fragments add no DOM node.
   return (
-    <Form method="post">
-      <s-stack direction="block" gap="large-100">
-        <s-section heading="Filter">
-          <s-stack direction="block" gap="base">
-            <s-text-field
-              name="name"
-              label="Filter name"
-              details="Shown to shoppers as the section heading."
-              value={values.name}
-              error={errors.name}
-              required
-            />
+    <>
+      <Form method="post" ref={formRef}>
+        <s-section heading={values.id ? "Filter option" : "Add filter option"}>
+          <Tabs tabs={TABS} selected={tab} onSelect={setTab} />
 
-            <s-select
-              name="source"
-              label="Data source"
-              value={source}
-              error={errors.source}
-              details={definition?.helpText}
-              onChange={(event) => {
-                const next = event.currentTarget.value;
-                setSource(next);
-                setSourceKey("");
-                if (isFilterSource(next)) {
-                  setDisplayType(FILTER_SOURCE_DEFINITIONS[next].defaultDisplayType);
-                }
-              }}
-            >
-              {FILTER_SOURCES.map((candidate) => {
-                const locked = lockedSources[candidate];
-                return (
-                  <s-option
-                    key={candidate}
-                    value={candidate}
-                    disabled={Boolean(locked) || undefined}
+          <div
+            id="panel-general"
+            role="tabpanel"
+            aria-labelledby="tab-general"
+            hidden={tab !== "general"}
+          >
+            <s-stack direction="block" gap="base">
+              <s-select
+                name="source"
+                label="Option type"
+                value={source}
+                error={errors.source}
+                details={definition?.helpText}
+              >
+                {groupedFilterSources().map((group) => (
+                  <s-option-group key={group.id} label={group.label}>
+                    {group.sources.map((entry) => {
+                      const locked = lockedSources[entry.source];
+                      return (
+                        <s-option
+                          key={entry.source}
+                          value={entry.source}
+                          disabled={Boolean(locked) || undefined}
+                        >
+                          {entry.label}
+                          {locked ? ` — ${locked}` : ""}
+                        </s-option>
+                      );
+                    })}
+                  </s-option-group>
+                ))}
+              </s-select>
+
+              <s-text-field
+                name="name"
+                label="Option label"
+                details="Shown to shoppers as the heading of this filter."
+                value={values.name}
+                error={errors.name}
+                required
+              />
+
+              {definition?.requiresSourceKey ? (
+                sourceKeyOptions.length > 0 ? (
+                  <s-select
+                    key={`source-key-${source}`}
+                    name="sourceKey"
+                    label={definition.sourceKeyLabel ?? "Source"}
+                    value={sourceKey}
+                    error={errors.sourceKey}
                   >
-                    {FILTER_SOURCE_DEFINITIONS[candidate].label}
-                    {locked ? ` — ${locked}` : ""}
-                  </s-option>
-                );
-              })}
-            </s-select>
+                    <s-option value="">Choose…</s-option>
+                    {sourceKeyOptions.map((option) => (
+                      <s-option key={option.value} value={option.value}>
+                        {option.label}
+                      </s-option>
+                    ))}
+                  </s-select>
+                ) : (
+                  <s-text-field
+                    key={`source-key-${source}`}
+                    name="sourceKey"
+                    label={definition.sourceKeyLabel ?? "Source"}
+                    details="No options were found automatically — enter the value manually."
+                    value={sourceKey}
+                    error={errors.sourceKey}
+                  />
+                )
+              ) : null}
 
-            {definition?.requiresSourceKey ? (
-              sourceKeyOptions.length > 0 ? (
-                <s-select
-                  name="sourceKey"
-                  label={definition.sourceKeyLabel ?? "Source"}
-                  value={sourceKey}
-                  error={errors.sourceKey}
-                  onChange={(event) =>
-                    setSourceKey(event.currentTarget.value)
-                  }
+              {selectedOption?.caution ? (
+                <s-banner
+                  tone="warning"
+                  heading="May not filter on the storefront"
                 >
-                  <s-option value="">Choose…</s-option>
-                  {sourceKeyOptions.map((option) => (
-                    <s-option key={option.value} value={option.value}>
-                      {option.label}
-                    </s-option>
-                  ))}
-                </s-select>
+                  <s-paragraph>{selectedOption.caution}</s-paragraph>
+                </s-banner>
+              ) : null}
+
+              {definition?.nativeFilterable === false ? (
+                <s-banner
+                  tone="info"
+                  heading="Requires the app filtering engine"
+                >
+                  <s-paragraph>
+                    Shopify&apos;s native filtering cannot express this source,
+                    so collections using it will run on the app engine.
+                    Everything still works — it just uses an app request per
+                    filter change.
+                  </s-paragraph>
+                </s-banner>
+              ) : null}
+
+              <s-select
+                key={`display-type-${source}`}
+                name="displayType"
+                label="Display type"
+                value={effectiveDisplayType}
+                error={errors.displayType}
+              >
+                {allowedDisplayTypes.map((entry) => (
+                  <s-option key={entry} value={entry}>
+                    {FILTER_DISPLAY_LABELS[entry]}
+                  </s-option>
+                ))}
+              </s-select>
+
+              <s-select
+                name="groupId"
+                label="Group"
+                value={values.groupId ?? ""}
+              >
+                <s-option value="">No group</s-option>
+                {groups.map((group) => (
+                  <s-option key={group.id} value={group.id}>
+                    {group.name}
+                  </s-option>
+                ))}
+              </s-select>
+            </s-stack>
+          </div>
+
+          <div
+            id="panel-advanced"
+            role="tabpanel"
+            aria-labelledby="tab-advanced"
+            hidden={tab !== "advanced"}
+          >
+            <s-stack direction="block" gap="base">
+              <BooleanField
+                name="enabled"
+                label="Enabled"
+                details="Disabled options stay configured but do not appear on the storefront."
+                checked={values.enabled}
+              />
+              <BooleanField
+                name="showCount"
+                label="Show product count"
+                checked={values.showCount}
+              />
+              <BooleanField
+                name="hideEmpty"
+                label="Hide values with no products"
+                checked={values.hideEmpty}
+              />
+
+              {!isRange ? (
+                <>
+                  <BooleanField
+                    name="multiSelect"
+                    label="Allow multiple selections"
+                    details="Off behaves like a radio group."
+                    checked={values.multiSelect}
+                  />
+                  <BooleanField
+                    name="searchableValues"
+                    label="Add a search box to this option"
+                    details="Useful for long lists such as brands or sizes."
+                    checked={values.searchableValues}
+                  />
+                  <s-number-field
+                    name="maxVisibleValues"
+                    label="Values shown before the list scrolls"
+                    value={String(values.maxVisibleValues)}
+                    min={1}
+                    max={100}
+                    error={errors.maxVisibleValues}
+                  />
+                  <s-select
+                    name="valueSort"
+                    label="Value order"
+                    value={values.valueSort}
+                  >
+                    {VALUE_SORTS.map((sort) => (
+                      <s-option key={sort} value={sort}>
+                        {sort === "count"
+                          ? "Most products first"
+                          : sort === "alpha"
+                            ? "Alphabetical"
+                            : "Manual order"}
+                      </s-option>
+                    ))}
+                  </s-select>
+                </>
               ) : (
-                <s-text-field
-                  name="sourceKey"
-                  label={definition.sourceKeyLabel ?? "Source"}
-                  details="No options were found automatically — enter the value manually."
-                  value={sourceKey}
-                  error={errors.sourceKey}
-                  onChange={(event) =>
-                    setSourceKey(event.currentTarget.value)
-                  }
-                />
-              )
-            ) : null}
+                // Range options have a single control, so multi-select, value
+                // search and value ordering do not apply — but the fields must
+                // still submit or the saved record would lose them.
+                <>
+                  <input type="hidden" name="multiSelect" value="false" />
+                  <input type="hidden" name="searchableValues" value="false" />
+                  <input
+                    type="hidden"
+                    name="maxVisibleValues"
+                    value={String(values.maxVisibleValues)}
+                  />
+                  <input
+                    type="hidden"
+                    name="valueSort"
+                    value={values.valueSort}
+                  />
+                </>
+              )}
 
-            {selectedOption?.caution ? (
-              <s-banner tone="warning" heading="May not filter on the storefront">
-                <s-paragraph>{selectedOption.caution}</s-paragraph>
-              </s-banner>
-            ) : null}
+              <BooleanField
+                name="collapsedByDefault"
+                label="Collapsed by default"
+                checked={values.collapsedByDefault}
+              />
+            </s-stack>
+          </div>
 
-            {definition?.nativeFilterable === false ? (
-              <s-banner tone="info" heading="Requires the app filtering engine">
-                <s-paragraph>
-                  Shopify&apos;s native filtering cannot express this source, so
-                  collections using it will run on the app engine. Everything still
-                  works — it just uses an app request per filter change.
-                </s-paragraph>
-              </s-banner>
-            ) : null}
+          {errors._form ? (
+            <s-banner tone="critical" heading="Could not save">
+              <s-paragraph>{errors._form}</s-paragraph>
+            </s-banner>
+          ) : null}
 
-            <s-select
-              name="displayType"
-              label="Display type"
-              value={effectiveDisplayType}
-              error={errors.displayType}
-              onChange={(event) =>
-                setDisplayType(event.currentTarget.value)
-              }
-            >
-              {allowedDisplayTypes.map((candidate) => (
-                <s-option key={candidate} value={candidate}>
-                  {FILTER_DISPLAY_LABELS[candidate]}
-                </s-option>
-              ))}
-            </s-select>
-
-            <s-select name="groupId" label="Group" value={values.groupId ?? ""}>
-              <s-option value="">No group</s-option>
-              {groups.map((group) => (
-                <s-option key={group.id} value={group.id}>
-                  {group.name}
-                </s-option>
-              ))}
-            </s-select>
+          <s-stack direction="inline" gap="base">
+            <s-button type="submit" variant="primary">
+              {submitLabel}
+            </s-button>
+            <s-button href="/app/filters" variant="tertiary">
+              Cancel
+            </s-button>
           </s-stack>
         </s-section>
+      </Form>
 
-        <s-section heading="Behaviour">
-          <s-stack direction="block" gap="base">
-            <BooleanField
-              name="enabled"
-              label="Enabled"
-              details="Disabled filters stay configured but do not appear on the storefront."
-              checked={values.enabled}
-            />
-            <BooleanField
-              name="showCount"
-              label="Show product count"
-              checked={values.showCount}
-            />
-            <BooleanField
-              name="hideEmpty"
-              label="Hide values with no products"
-              checked={values.hideEmpty}
-            />
-
-            {!isRange ? (
-              <>
-                <BooleanField
-                  name="multiSelect"
-                  label="Allow multiple selections"
-                  details="Off behaves like a radio group."
-                  checked={values.multiSelect}
-                />
-                <BooleanField
-                  name="searchableValues"
-                  label="Add a search box to this filter"
-                  details="Useful for long lists such as brands or sizes."
-                  checked={values.searchableValues}
-                />
-                <s-number-field
-                  name="maxVisibleValues"
-                  label="Values shown before “Show more”"
-                  value={String(values.maxVisibleValues)}
-                  min={1}
-                  max={100}
-                  error={errors.maxVisibleValues}
-                />
-                <s-select name="valueSort" label="Value order" value={values.valueSort}>
-                  {VALUE_SORTS.map((sort) => (
-                    <s-option key={sort} value={sort}>
-                      {sort === "count"
-                        ? "Most products first"
-                        : sort === "alpha"
-                          ? "Alphabetical"
-                          : "Manual order"}
-                    </s-option>
-                  ))}
-                </s-select>
-              </>
-            ) : (
-              // Range filters have a single control, so multi-select, value
-              // search and value ordering do not apply — but the fields must
-              // still submit or the saved record would lose them.
-              <>
-                <input type="hidden" name="multiSelect" value="false" />
-                <input type="hidden" name="searchableValues" value="false" />
-                <input
-                  type="hidden"
-                  name="maxVisibleValues"
-                  value={String(values.maxVisibleValues)}
-                />
-                <input type="hidden" name="valueSort" value={values.valueSort} />
-              </>
-            )}
-
-            <BooleanField
-              name="collapsedByDefault"
-              label="Collapsed by default"
-              checked={values.collapsedByDefault}
-            />
-          </s-stack>
-        </s-section>
-
-        {errors._form ? (
-          <s-banner tone="critical" heading="Could not save">
-            <s-paragraph>{errors._form}</s-paragraph>
-          </s-banner>
-        ) : null}
-
-        <s-stack direction="inline" gap="base">
-          <s-button type="submit" variant="primary">
-            {submitLabel}
-          </s-button>
-          <s-button href="/app/filters" variant="tertiary">
-            Cancel
-          </s-button>
-        </s-stack>
-      </s-stack>
-    </Form>
+      <s-section slot="aside" heading="Preview">
+        <FilterPreview
+          label={name}
+          displayType={
+            isFilterDisplayType(effectiveDisplayType)
+              ? effectiveDisplayType
+              : "checkbox"
+          }
+        />
+      </s-section>
+    </>
   );
 }

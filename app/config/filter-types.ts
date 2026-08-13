@@ -46,9 +46,23 @@ export type ValueSort = (typeof VALUE_SORTS)[number];
 /** How a source's values behave, which drives parsing and rendering. */
 export type FilterValueKind = "list" | "numeric" | "boolean";
 
+/**
+ * How sources are grouped in the "Option type" picker. Standard sources need
+ * nothing but a label; the other two ask the merchant which option or
+ * metafield the filter reads, which is why they are separated.
+ */
+export const FILTER_SOURCE_GROUPS = [
+  { id: "standard", label: "Standard" },
+  { id: "product_option", label: "Product option" },
+  { id: "product_metafield", label: "Product metafield" },
+] as const;
+
+export type FilterSourceGroup = (typeof FILTER_SOURCE_GROUPS)[number]["id"];
+
 export interface FilterSourceDefinition {
   source: FilterSource;
   label: string;
+  group: FilterSourceGroup;
   helpText: string;
   /** Does the merchant have to pick an option name / metafield key? */
   requiresSourceKey: boolean;
@@ -80,6 +94,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   product_option: {
     source: "product_option",
     label: "Product option",
+    group: "product_option",
     helpText: "Filter by a product option such as Color, Size or Material.",
     requiresSourceKey: true,
     sourceKeyLabel: "Option",
@@ -91,6 +106,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   variant_option: {
     source: "variant_option",
     label: "Variant option",
+    group: "product_option",
     helpText: "Filter by an option defined at the variant level.",
     requiresSourceKey: true,
     sourceKeyLabel: "Option",
@@ -102,6 +118,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   vendor: {
     source: "vendor",
     label: "Vendor",
+    group: "standard",
     helpText: "Filter by the product vendor, often used as the brand.",
     requiresSourceKey: false,
     valueKind: "list",
@@ -112,6 +129,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   product_type: {
     source: "product_type",
     label: "Product type",
+    group: "standard",
     helpText: "Filter by the product type set on each product.",
     requiresSourceKey: false,
     valueKind: "list",
@@ -122,6 +140,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   tag: {
     source: "tag",
     label: "Tag",
+    group: "standard",
     helpText: "Filter by product tags.",
     requiresSourceKey: false,
     valueKind: "list",
@@ -132,6 +151,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   collection: {
     source: "collection",
     label: "Collection",
+    group: "standard",
     helpText:
       'Filter by collection membership — the usual source for a "Shop by category" list.',
     requiresSourceKey: false,
@@ -143,6 +163,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   price: {
     source: "price",
     label: "Price",
+    group: "standard",
     helpText: "Filter by variant price range.",
     requiresSourceKey: false,
     valueKind: "numeric",
@@ -153,6 +174,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   availability: {
     source: "availability",
     label: "Availability",
+    group: "standard",
     helpText: "Filter by in stock / out of stock.",
     requiresSourceKey: false,
     valueKind: "list",
@@ -163,6 +185,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   product_metafield: {
     source: "product_metafield",
     label: "Product metafield",
+    group: "product_metafield",
     helpText:
       "Filter by a product metafield. The definition must be marked as filterable in Shopify.",
     requiresSourceKey: true,
@@ -175,6 +198,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   variant_metafield: {
     source: "variant_metafield",
     label: "Variant metafield",
+    group: "product_metafield",
     helpText:
       "Filter by a variant metafield. The definition must be marked as filterable in Shopify.",
     requiresSourceKey: true,
@@ -187,6 +211,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   rating: {
     source: "rating",
     label: "Rating",
+    group: "standard",
     helpText:
       'Filter by a rating metafield such as reviews.rating, using "N stars and up".',
     requiresSourceKey: true,
@@ -199,6 +224,7 @@ export const FILTER_SOURCE_DEFINITIONS: Record<
   title: {
     source: "title",
     label: "Product title",
+    group: "standard",
     helpText:
       "Match against the product title. Requires the app filtering engine.",
     requiresSourceKey: false,
@@ -233,13 +259,26 @@ export function isRangeDisplayType(displayType: string): boolean {
   return RANGE_DISPLAY_TYPES.includes(displayType as FilterDisplayType);
 }
 
+/** Sources arranged for the "Option type" picker, in registry order. */
+export function groupedFilterSources(): {
+  id: FilterSourceGroup;
+  label: string;
+  sources: FilterSourceDefinition[];
+}[] {
+  return FILTER_SOURCE_GROUPS.map((group) => ({
+    id: group.id,
+    label: group.label,
+    sources: FILTER_SOURCES.map(
+      (source) => FILTER_SOURCE_DEFINITIONS[source],
+    ).filter((definition) => definition.group === group.id),
+  })).filter((group) => group.sources.length > 0);
+}
+
 export function isFilterSource(value: string): value is FilterSource {
   return (FILTER_SOURCES as readonly string[]).includes(value);
 }
 
-export function isFilterDisplayType(
-  value: string,
-): value is FilterDisplayType {
+export function isFilterDisplayType(value: string): value is FilterDisplayType {
   return (FILTER_DISPLAY_TYPES as readonly string[]).includes(value);
 }
 

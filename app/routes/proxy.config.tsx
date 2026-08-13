@@ -40,17 +40,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       getPlanForShop(context.shop.id),
     ]);
 
-    // "auto" resolves to native only when every filter can run natively.
-    const engine =
-      settings.general.engine === "auto"
-        ? filterConfig.nativeEligible
-          ? "native"
-          : "app"
-        : settings.general.engine;
-
     return {
-      engine,
+      // The Products & filter block replaces the theme's product section, so
+      // the app renders the results on every page it is placed on. Engine
+      // Native's "let the theme render them" path has no surface left to run
+      // on; `nativeEligible` is reported so the admin can still tell a
+      // merchant which of their filters Shopify could not express itself.
+      engine: "app" as const,
+      nativeEligible: filterConfig.nativeEligible,
       layout: filterConfig.layout,
+      mobileLayout: settings.general.mobileLayout,
       source: filterConfig.source,
       collectionHandle,
       filters: filterConfig.filters.map((filter) => ({

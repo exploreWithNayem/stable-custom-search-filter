@@ -20,8 +20,11 @@
       "other": "{{ count }} products"
     },
     "showing": "Showing {{ count }}",
-    "sort": "Sort",
+    "sort": "Sort by",
     "show": "Show",
+    "view_as": "View as",
+    "view_grid": "Grid view",
+    "view_list": "List view",
     "loading": "Loading results"
   },
   "search": {

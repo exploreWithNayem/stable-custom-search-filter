@@ -16,7 +16,10 @@ import type { SuggestResponse } from "./types";
 let sequence = 0;
 let controller: AbortController | null = null;
 
-async function fetchTier2(term: string, signal: AbortSignal): Promise<SuggestResponse | null> {
+async function fetchTier2(
+  term: string,
+  signal: AbortSignal,
+): Promise<SuggestResponse | null> {
   const { proxy } = readContext();
   const response = await fetch(
     `${proxy}/suggest?q=${encodeURIComponent(term)}`,
@@ -40,7 +43,12 @@ interface NativeSuggestPayload {
         price?: string;
         vendor?: string;
       }[];
-      collections?: { id: string; title: string; handle: string; url: string }[];
+      collections?: {
+        id: string;
+        title: string;
+        handle: string;
+        url: string;
+      }[];
       queries?: { text: string }[];
     };
   };
@@ -125,9 +133,15 @@ function renderSuggestions(
 
   if (data.queries.length > 0) {
     nodes.push(
-      el("p", { class: "scfs-suggest__heading", text: strings.searchSuggestions }),
+      el("p", {
+        class: "scfs-suggest__heading",
+        text: strings.searchSuggestions,
+      }),
     );
-    const list = el("ul", { class: "scfs-suggest__list", role: "presentation" });
+    const list = el("ul", {
+      class: "scfs-suggest__list",
+      role: "presentation",
+    });
     for (const query of data.queries) {
       const option = el("li", {
         class: "scfs-suggest__item",
@@ -149,7 +163,10 @@ function renderSuggestions(
     nodes.push(
       el("p", { class: "scfs-suggest__heading", text: strings.searchProducts }),
     );
-    const list = el("ul", { class: "scfs-suggest__list", role: "presentation" });
+    const list = el("ul", {
+      class: "scfs-suggest__list",
+      role: "presentation",
+    });
     for (const product of data.products) {
       const option = el("li", {
         class: "scfs-suggest__item scfs-suggest__item--product",
@@ -203,18 +220,28 @@ function renderSuggestions(
 
   if (data.collections.length > 0) {
     nodes.push(
-      el("p", { class: "scfs-suggest__heading", text: strings.searchCollections }),
+      el("p", {
+        class: "scfs-suggest__heading",
+        text: strings.searchCollections,
+      }),
     );
-    const list = el("ul", { class: "scfs-suggest__list", role: "presentation" });
+    const list = el("ul", {
+      class: "scfs-suggest__list",
+      role: "presentation",
+    });
     for (const collection of data.collections) {
       list.appendChild(
-        el("li", { class: "scfs-suggest__item", role: "option", tabindex: "-1" }, [
-          el("a", {
-            class: "scfs-suggest__link",
-            href: collection.url,
-            text: collection.title,
-          }),
-        ]),
+        el(
+          "li",
+          { class: "scfs-suggest__item", role: "option", tabindex: "-1" },
+          [
+            el("a", {
+              class: "scfs-suggest__link",
+              href: collection.url,
+              text: collection.title,
+            }),
+          ],
+        ),
       );
     }
     nodes.push(list);
@@ -303,10 +330,14 @@ function installKeyboard(panel: HTMLElement, input: HTMLInputElement): void {
 // ---------------------------------------------------------------------------
 
 export function initSearch(root: HTMLElement): void {
-  const input = root.querySelector<HTMLInputElement>("[data-scfs-search-input]");
+  const input = root.querySelector<HTMLInputElement>(
+    "[data-scfs-search-input]",
+  );
   const panel = root.querySelector<HTMLElement>("[data-scfs-search-results]");
   const form = root.querySelector<HTMLFormElement>("[data-scfs-search-form]");
-  const clearButton = root.querySelector<HTMLElement>("[data-scfs-search-clear]");
+  const clearButton = root.querySelector<HTMLElement>(
+    "[data-scfs-search-clear]",
+  );
   if (!input || !panel) return;
 
   const minChars = Number(root.dataset.scfsMinChars ?? 2);
@@ -363,7 +394,8 @@ export function initSearch(root: HTMLElement): void {
   });
 
   input.addEventListener("focus", () => {
-    if (input.value.trim().length >= minChars) void runSuggest(input.value.trim());
+    if (input.value.trim().length >= minChars)
+      void runSuggest(input.value.trim());
   });
 
   clearButton?.addEventListener("click", () => {

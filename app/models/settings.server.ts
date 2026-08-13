@@ -64,6 +64,22 @@ export async function updateGeneralSettings(
   });
 }
 
+/**
+ * Merges a subset of the general settings.
+ *
+ * The layout picker edits two fields out of a dozen; writing the whole blob
+ * from that page would silently reset everything the merchant set elsewhere.
+ */
+export async function patchGeneralSettings(
+  shopId: string,
+  patch: Partial<GeneralSettings>,
+): Promise<GeneralSettings> {
+  const current = await getSettings(shopId);
+  const next = generalSettingsSchema.parse({ ...current.general, ...patch });
+  await updateGeneralSettings(shopId, next);
+  return next;
+}
+
 export async function updateAppearanceSettings(
   shopId: string,
   appearance: AppearanceSettings,

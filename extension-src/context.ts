@@ -113,6 +113,29 @@ export function formatCount(count: number): string {
   return template.replace("__COUNT__", count.toLocaleString());
 }
 
+/**
+ * The shop's currency symbol, for labelling a price range's inputs.
+ *
+ * Taken from `Intl` rather than parsed out of the theme's money format, which
+ * is a Liquid template (`${{amount}}`) and differs per shop. Returns an empty
+ * string if the runtime cannot resolve one, so a missing symbol degrades to no
+ * prefix rather than to a stray character.
+ */
+export function currencySymbol(): string {
+  const { context } = readContext();
+  try {
+    const parts = new Intl.NumberFormat(context.locale || "en", {
+      style: "currency",
+      currency: context.currency || "USD",
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+
+    return parts.find((part) => part.type === "currency")?.value ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function formatMoney(amount: string, currency: string): string {
   const value = Number(amount);
   if (!Number.isFinite(value)) return amount;

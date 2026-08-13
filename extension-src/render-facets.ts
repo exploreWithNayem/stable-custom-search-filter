@@ -6,7 +6,7 @@
  */
 
 import { el, replaceChildren, show } from "./dom";
-import { readContext } from "./context";
+import { currencySymbol, readContext } from "./context";
 import { actions } from "./store";
 import type { Facet, FacetValue } from "./types";
 
@@ -73,9 +73,7 @@ function renderDropdown(facet: Facet): HTMLElement {
       el("option", {
         value: value.value,
         selected: value.active,
-        text: facet.showCount
-          ? `${value.label} (${value.count})`
-          : value.label,
+        text: facet.showCount ? `${value.label} (${value.count})` : value.label,
       }),
     );
   }
@@ -189,7 +187,10 @@ function renderRating(facet: Facet): HTMLElement {
       disabled: value.count === 0 && !value.active,
     });
 
-    const stars = el("span", { class: "scfs-rating__stars", "aria-hidden": "true" });
+    const stars = el("span", {
+      class: "scfs-rating__stars",
+      "aria-hidden": "true",
+    });
     for (let index = 1; index <= 5; index += 1) {
       stars.appendChild(
         el("span", {
@@ -218,13 +219,28 @@ function renderRating(facet: Facet): HTMLElement {
   return wrapper;
 }
 
+/**
+ * One bordered box holding the unit and its input, so the pair reads as two
+ * fields with a separator rather than four loose elements in a row.
+ */
+function rangeField(unit: string, input: HTMLInputElement): HTMLElement {
+  return el("div", { class: "scfs-range__field" }, [
+    unit ? el("span", { class: "scfs-range__prefix", text: unit }) : null,
+    input,
+  ]);
+}
+
 function renderRange(facet: Facet): HTMLElement {
   const range = facet.range!;
   const min = range.min ?? 0;
   const max = range.max ?? 100;
   const currentMin = range.selectedMin ?? min;
   const currentMax = range.selectedMax ?? max;
-  const unit = range.unit ?? "";
+
+  // A merchant can set an explicit unit ("cm", "kg"); a price range has an
+  // obvious one and should not need configuring to show it.
+  const unit =
+    range.unit ?? (facet.source === "price" ? currencySymbol() : "");
 
   const wrapper = el("div", { class: "scfs-range" });
 
@@ -265,61 +281,136 @@ function renderRange(facet: Facet): HTMLElement {
 
   wrapper.appendChild(
     el("div", { class: "scfs-range__fields" }, [
-      el("span", { class: "scfs-range__prefix", text: unit }),
-      minInput,
-      el("span", { class: "scfs-range__separator", "aria-hidden": "true", text: "–" }),
-      el("span", { class: "scfs-range__prefix", text: unit }),
-      maxInput,
+      rangeField(unit, minInput),
+      el("span", {
+        class: "scfs-range__separator",
+        "aria-hidden": "true",
+        text: "-",
+      }),
+      rangeField(unit, maxInput),
     ]),
   );
 
-  if (facet.displayType === "range_slider" && range.min !== null && range.max !== null) {
-    // Two overlaid single sliders: keyboard-operable and screen-reader friendly,
-    // which a custom drag-handle widget usually is not.
-    const sliders = el("div", { class: "scfs-slider" });
-
-    const lower = el("input", {
-      type: "range",
-      class: "scfs-slider__input scfs-slider__input--lower",
-      min: String(min),
-      max: String(max),
-      step: String(range.step),
-      value: String(currentMin),
-      "aria-label": `${facet.label} minimum`,
-    });
-
-    const upper = el("input", {
-      type: "range",
-      class: "scfs-slider__input scfs-slider__input--upper",
-      min: String(min),
-      max: String(max),
-      step: String(range.step),
-      value: String(currentMax),
-      "aria-label": `${facet.label} maximum`,
-    });
-
-    const sync = () => {
-      // Keep the handles from crossing over each other.
-      if (Number(lower.value) > Number(upper.value)) {
-        const swap = lower.value;
-        lower.value = upper.value;
-        upper.value = swap;
-      }
-      minInput.value = lower.value;
-      maxInput.value = upper.value;
-    };
-
-    lower.addEventListener("input", sync);
-    upper.addEventListener("input", sync);
-    lower.addEventListener("change", commit);
-    upper.addEventListener("change", commit);
-
-    sliders.appendChild(lower);
-    sliders.appendChild(upper);
-    wrapper.appendChild(sliders);
+  if (
+    facet.displayType === "range_slider" &&
+    range.min !== null &&
+    range.max !== null
+  ) {
+    wrapper.appendChild(
+      renderSliderTrack(
+        facet,
+        min,
+        max,
+        currentMin,
+        currentMax,
+        minInput,
+        maxInput,
+        commit,
+      ),
+    );
   }
 
   return wrapper;
+}
+
+/**
+ * Formats a tick label: integers stay bare, fractions keep two decimals.
+ *
+ * Truncated rather than rounded, so a tick can never advertise a bound above
+ * the range's own maximum — rounding 564.9975 up to 565.00 would offer a price
+ * the slider cannot actually select.
+ */
+function tickLabel(value: number): string {
+  if (Number.isInteger(value)) return String(value);
+  return (Math.floor(value * 100) / 100).toFixed(2);
+}
+
+/**
+ * Two overlaid single sliders plus a tick scale. Native range inputs are
+ * keyboard-operable and screen-reader friendly, which a custom drag-handle
+ * widget usually is not.
+ */
+function renderSliderTrack(
+  facet: Facet,
+  min: number,
+  max: number,
+  currentMin: number,
+  currentMax: number,
+  minInput: HTMLInputElement,
+  maxInput: HTMLInputElement,
+  commit: () => void,
+): HTMLElement {
+  const step = facet.range!.step;
+  const container = el("div", { class: "scfs-slider-wrap" });
+  const sliders = el("div", { class: "scfs-slider" });
+
+  const lower = el("input", {
+    type: "range",
+    class: "scfs-slider__input scfs-slider__input--lower",
+    min: String(min),
+    max: String(max),
+    step: String(step),
+    value: String(currentMin),
+    "aria-label": `${facet.label} minimum`,
+  });
+
+  const upper = el("input", {
+    type: "range",
+    class: "scfs-slider__input scfs-slider__input--upper",
+    min: String(min),
+    max: String(max),
+    step: String(step),
+    value: String(currentMax),
+    "aria-label": `${facet.label} maximum`,
+  });
+
+  // The filled segment between the handles is drawn from these two percentages.
+  const paint = () => {
+    const span = max - min || 1;
+    const from = ((Number(lower.value) - min) / span) * 100;
+    const to = ((Number(upper.value) - min) / span) * 100;
+    sliders.style.setProperty("--scfs-from", `${from}%`);
+    sliders.style.setProperty("--scfs-to", `${to}%`);
+  };
+
+  const sync = () => {
+    // Keep the handles from crossing over each other.
+    if (Number(lower.value) > Number(upper.value)) {
+      const swap = lower.value;
+      lower.value = upper.value;
+      upper.value = swap;
+    }
+    minInput.value = lower.value;
+    maxInput.value = upper.value;
+    paint();
+  };
+
+  lower.addEventListener("input", sync);
+  upper.addEventListener("input", sync);
+  lower.addEventListener("change", commit);
+  upper.addEventListener("change", commit);
+
+  sliders.appendChild(lower);
+  sliders.appendChild(upper);
+  paint();
+  container.appendChild(sliders);
+
+  const ticks = el("div", {
+    class: "scfs-slider__ticks",
+    "aria-hidden": "true",
+  });
+  // Five evenly spaced marks: quarters read as a scale without crowding the
+  // labels into each other at sidebar width.
+  const TICKS = 4;
+  for (let index = 0; index <= TICKS; index += 1) {
+    const value = min + ((max - min) * index) / TICKS;
+    ticks.appendChild(
+      el("span", { class: "scfs-slider__tick", text: tickLabel(value) }),
+    );
+  }
+  container.appendChild(ticks);
+
+  return container;
 }
 
 function renderBoolean(facet: Facet): HTMLElement {
@@ -336,11 +427,15 @@ function renderBoolean(facet: Facet): HTMLElement {
     actions.toggleValue(facet.param, value.value, false);
   });
 
-  return el("label", { class: "scfs-value", for: valueId(facet, value.value) }, [
-    input,
-    el("span", { class: "scfs-value__label", text: value.label }),
-    countBadge(facet, value),
-  ]);
+  return el(
+    "label",
+    { class: "scfs-value", for: valueId(facet, value.value) },
+    [
+      input,
+      el("span", { class: "scfs-value__label", text: value.label }),
+      countBadge(facet, value),
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -369,19 +464,46 @@ function renderFacetBody(facet: Facet): HTMLElement {
   }
 }
 
-/** Adds "show more" and an in-facet value search when configured. */
-function applyValueOverflow(facet: Facet, body: HTMLElement): HTMLElement[] {
+/**
+ * Long value lists scroll inside the facet rather than pushing the rest of the
+ * sidebar down; pills wrap and reveal the overflow behind "Show more" instead,
+ * because a scrolling pill grid hides values that are only one row away.
+ */
+function overflowMode(facet: Facet): "scroll" | "more" {
+  switch (facet.displayType) {
+    case "button":
+    case "tag_pill":
+    case "rating":
+    case "boolean":
+    case "dropdown":
+    case "range":
+    case "range_slider":
+      return "more";
+    default:
+      return "scroll";
+  }
+}
+
+/** Adds the value scroll box or "show more", plus an in-facet value search. */
+function applyValueOverflow(
+  facet: Facet,
+  body: HTMLElement,
+  showAll: boolean,
+): HTMLElement[] {
   const nodes: HTMLElement[] = [];
   const items = Array.from(
-    body.querySelectorAll<HTMLElement>(".scfs-values__item, .scfs-pill, .scfs-swatch"),
+    body.querySelectorAll<HTMLElement>(
+      ".scfs-values__item, .scfs-pill, .scfs-swatch",
+    ),
   );
 
   if (facet.searchableValues && items.length > 4) {
+    const strings = readContext().strings;
     const search = el("input", {
       type: "search",
       class: "scfs-facet-search",
-      placeholder: readContext().strings.searchValues,
-      "aria-label": `${readContext().strings.searchValues}: ${facet.label}`,
+      placeholder: strings.searchValues,
+      "aria-label": `${strings.searchValues}: ${facet.label}`,
     });
 
     search.addEventListener("input", () => {
@@ -395,9 +517,28 @@ function applyValueOverflow(facet: Facet, body: HTMLElement): HTMLElement[] {
     nodes.push(search);
   }
 
+  // The "show all filter options" layout exists precisely so nothing is
+  // hidden; capping values there would defeat the layout the merchant chose.
+  const overflows = !showAll && items.length > facet.maxVisibleValues;
+
+  if (overflows && overflowMode(facet) === "scroll") {
+    // CSS turns the row count into a height, so the box always cuts a row in
+    // half — which is what signals "there is more below" without a legend.
+    const box = el("div", {
+      class: "scfs-scroll",
+      tabindex: "0",
+      role: "group",
+      "aria-label": facet.label,
+    });
+    box.style.setProperty("--scfs-visible", String(facet.maxVisibleValues));
+    box.appendChild(body);
+    nodes.push(box);
+    return nodes;
+  }
+
   nodes.push(body);
 
-  if (items.length > facet.maxVisibleValues) {
+  if (overflows) {
     let expanded = false;
     const hidden = items.slice(facet.maxVisibleValues);
     for (const item of hidden) item.style.display = "none";
@@ -424,23 +565,34 @@ function applyValueOverflow(facet: Facet, body: HTMLElement): HTMLElement[] {
   return nodes;
 }
 
-function renderFacet(facet: Facet): HTMLElement {
+function renderFacet(facet: Facet, showAll: boolean): HTMLElement {
   const details = el("details", {
     class: `scfs-group scfs-group--${facet.displayType}`,
     "data-scfs-facet": facet.handle,
-    open: !facet.collapsedByDefault || facet.activeCount > 0,
+    open: showAll || !facet.collapsedByDefault || facet.activeCount > 0,
   });
+
+  // `<details>` hides its body through an internal slot, so CSS alone cannot
+  // hold it open — the layout has to keep the element open itself.
+  if (showAll) {
+    details.addEventListener("toggle", () => {
+      if (!details.open) details.open = true;
+    });
+  }
 
   const summary = el("summary", { class: "scfs-group__summary" }, [
     el("span", { class: "scfs-group__title", text: facet.label }),
     facet.activeCount > 0
-      ? el("span", { class: "scfs-group__badge", text: String(facet.activeCount) })
+      ? el("span", {
+          class: "scfs-group__badge",
+          text: String(facet.activeCount),
+        })
       : null,
     el("span", { class: "scfs-group__chevron", "aria-hidden": "true" }),
   ]);
 
   const body = el("div", { class: "scfs-group__body" }, [
-    ...applyValueOverflow(facet, renderFacetBody(facet)),
+    ...applyValueOverflow(facet, renderFacetBody(facet), showAll),
   ]);
 
   details.appendChild(summary);
@@ -453,10 +605,16 @@ function renderFacet(facet: Facet): HTMLElement {
 // ---------------------------------------------------------------------------
 
 export function renderFacets(container: HTMLElement, facets: Facet[]): void {
-  if (facets.length === 0) {
-    replaceChildren(container, []);
-    return;
-  }
+  // No facets means the app has nothing better to offer, not that the shopper
+  // should lose the filters Liquid already rendered from `collection.filters`
+  // (§12.4). Clearing here is how a failed or empty response used to blank the
+  // whole sidebar.
+  if (facets.length === 0) return;
+
+  const root = container.closest<HTMLElement>("[data-scfs-app]");
+  const showAll =
+    root?.dataset.scfsDesktopLayout === "show_all" &&
+    window.matchMedia("(min-width: 990px)").matches;
 
   const nodes: HTMLElement[] = [];
   let currentGroup: string | null = null;
@@ -483,12 +641,15 @@ export function renderFacets(container: HTMLElement, facets: Facet[]): void {
       }
     }
 
-    const rendered = renderFacet(facet);
+    const rendered = renderFacet(facet, showAll);
     if (groupBody) groupBody.appendChild(rendered);
     else nodes.push(rendered);
   }
 
   replaceChildren(container, nodes);
+  // From here the controls are ours and carry their own listeners, so the
+  // delegated handler for the server-rendered fallback must stand down.
+  container.dataset.scfsRendered = "true";
 }
 
 export function renderActiveCount(count: number): void {

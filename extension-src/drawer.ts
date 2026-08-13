@@ -10,9 +10,15 @@ import { show, trapFocus } from "./dom";
 
 export function initDrawer(sidebar: HTMLElement): void {
   const panel = sidebar.querySelector<HTMLElement>("[data-scfs-panel]");
-  const openButton = sidebar.querySelector<HTMLElement>("[data-scfs-drawer-open]");
-  const closeButton = sidebar.querySelector<HTMLElement>("[data-scfs-drawer-close]");
-  const applyButton = sidebar.querySelector<HTMLElement>("[data-scfs-drawer-apply]");
+  const openButton = sidebar.querySelector<HTMLElement>(
+    "[data-scfs-drawer-open]",
+  );
+  const closeButton = sidebar.querySelector<HTMLElement>(
+    "[data-scfs-drawer-close]",
+  );
+  const applyButton = sidebar.querySelector<HTMLElement>(
+    "[data-scfs-drawer-apply]",
+  );
   const scrim = sidebar.querySelector<HTMLElement>("[data-scfs-drawer-scrim]");
 
   if (!panel || !openButton) return;
@@ -20,12 +26,24 @@ export function initDrawer(sidebar: HTMLElement): void {
   let releaseFocus: (() => void) | null = null;
   let previousOverflow = "";
 
+  /*
+   * Whether this is an overlay is a layout decision, and layout lives in CSS.
+   * Reading the computed position keeps the two from disagreeing: the inline
+   * mobile layout must not lock body scroll or trap focus, because the panel
+   * is still part of the page.
+   */
+  function isOverlay(): boolean {
+    return window.getComputedStyle(panel!).position === "fixed";
+  }
+
   function open(): void {
     sidebar.classList.add("scfs-sidebar--open");
     openButton?.setAttribute("aria-expanded", "true");
-    show(scrim, true);
     show(closeButton, true);
 
+    if (!isOverlay()) return;
+
+    show(scrim, true);
     previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -53,16 +71,24 @@ export function initDrawer(sidebar: HTMLElement): void {
   scrim?.addEventListener("click", close);
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && sidebar.classList.contains("scfs-sidebar--open")) {
+    if (
+      event.key === "Escape" &&
+      sidebar.classList.contains("scfs-sidebar--open")
+    ) {
       close();
     }
   });
 
-  // The drawer only exists below the desktop breakpoint; if the viewport grows
-  // while it is open, restore the page rather than leaving scroll locked.
+  // In the sidebar layouts the panel becomes a static column above the
+  // breakpoint, so an open drawer must be closed or body scroll stays locked
+  // behind a panel that is now part of the page. The off-canvas layouts keep
+  // their overlay at every width, and `isOverlay` is what tells them apart —
+  // including after the runtime resolves a layout the block deferred to us.
   const media = window.matchMedia("(min-width: 990px)");
   const onChange = (event: MediaQueryListEvent | MediaQueryList) => {
-    if (event.matches && sidebar.classList.contains("scfs-sidebar--open")) close();
+    if (!event.matches) return;
+    if (sidebar.classList.contains("scfs-sidebar--open") && !isOverlay())
+      close();
   };
   if ("addEventListener" in media) media.addEventListener("change", onChange);
 }

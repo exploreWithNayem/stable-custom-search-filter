@@ -1,5 +1,7 @@
 /**
- * Bundles the theme extension's TypeScript source into `assets/scfs.js`.
+ * Builds the theme extension's assets from `extension-src/`.
+ *
+ * `index.ts` → `assets/scfs.js`, `scfs.css` → `assets/scfs.css`, both minified.
  *
  * The bundle's entry graph reaches into `app/lib/filter-url.ts`, so the
  * storefront and the server share one implementation of the URL grammar by
@@ -36,11 +38,9 @@ function format(bytes) {
 }
 
 async function main() {
-  const outfile = join(extensionDir, "assets", "scfs.js");
-
   const result = await build({
     entryPoints: [join(sourceDir, "index.ts")],
-    outfile,
+    outfile: join(extensionDir, "assets", "scfs.js"),
     bundle: true,
     minify: true,
     format: "iife",
@@ -52,6 +52,21 @@ async function main() {
   });
 
   if (result.errors.length > 0) {
+    process.exitCode = 1;
+    return;
+  }
+
+  // The stylesheet is minified rather than copied, so its comments can be as
+  // long as they need to be without spending the §17 budget on them.
+  const css = await build({
+    entryPoints: [join(sourceDir, "scfs.css")],
+    outfile: join(extensionDir, "assets", "scfs.css"),
+    minify: true,
+    loader: { ".css": "css" },
+    logLevel: "warning",
+  });
+
+  if (css.errors.length > 0) {
     process.exitCode = 1;
     return;
   }

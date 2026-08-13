@@ -21,30 +21,45 @@
     <div class="scfs-group__body">
       {%- case filter.type -%}
         {%- when 'price_range' -%}
+          {%- liquid
+            comment
+              `.scfs-range` is a column and `.scfs-range__fields` is the row —
+              without the row wrapper the two inputs stack, which is what made
+              this render as two empty boxes with a stray dash between them.
+            endcomment
+            assign range_max = filter.range_max | money_without_currency | replace: ',', ''
+            assign currency = cart.currency.symbol | default: shop.currency
+          -%}
           <div class="scfs-range">
-            <label class="scfs-range__field">
-              <span class="scfs-visually-hidden">{{ filter.label }} minimum</span>
-              <input
-                type="number"
-                name="{{ filter.min_value.param_name }}"
-                value="{{ filter.min_value.value }}"
-                min="0"
-                max="{{ filter.range_max | money_without_currency | replace: ',', '' }}"
-                inputmode="decimal"
-              >
-            </label>
-            <span class="scfs-range__separator" aria-hidden="true">–</span>
-            <label class="scfs-range__field">
-              <span class="scfs-visually-hidden">{{ filter.label }} maximum</span>
-              <input
-                type="number"
-                name="{{ filter.max_value.param_name }}"
-                value="{{ filter.max_value.value }}"
-                min="0"
-                max="{{ filter.range_max | money_without_currency | replace: ',', '' }}"
-                inputmode="decimal"
-              >
-            </label>
+            <div class="scfs-range__fields">
+              <label class="scfs-range__field">
+                <span class="scfs-visually-hidden">{{ filter.label }} minimum</span>
+                <span class="scfs-range__prefix" aria-hidden="true">{{ currency }}</span>
+                <input
+                  type="number"
+                  name="{{ filter.min_value.param_name }}"
+                  value="{{ filter.min_value.value }}"
+                  placeholder="0"
+                  min="0"
+                  max="{{ range_max }}"
+                  inputmode="decimal"
+                >
+              </label>
+              <span class="scfs-range__separator" aria-hidden="true">-</span>
+              <label class="scfs-range__field">
+                <span class="scfs-visually-hidden">{{ filter.label }} maximum</span>
+                <span class="scfs-range__prefix" aria-hidden="true">{{ currency }}</span>
+                <input
+                  type="number"
+                  name="{{ filter.max_value.param_name }}"
+                  value="{{ filter.max_value.value }}"
+                  placeholder="{{ range_max }}"
+                  min="0"
+                  max="{{ range_max }}"
+                  inputmode="decimal"
+                >
+              </label>
+            </div>
           </div>
 
         {%- else -%}
